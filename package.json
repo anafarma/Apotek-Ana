@@ -1,0 +1,12 @@
+{
+  "name": "apotek-ana",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Clean architectural foundation for the Apotek Ana pharmacy system",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests",
+    "test:domain": "node --test tests/domain"
+  },
+  "engines": { "node": ">=20" }
+}
