@@ -7,10 +7,24 @@ on:
 
 jobs:
   unit:
+    name: test-${{ matrix.suite }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - domain
+          - application
+          - infrastructure
+          - architecture
+          - ui
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm test
+      - run: |
+          case "${{ matrix.suite }}" in
+            ui) node --test tests/ui.acceptance.test.js ;;
+            *) node --test "tests/${{ matrix.suite }}" ;;
+          esac
