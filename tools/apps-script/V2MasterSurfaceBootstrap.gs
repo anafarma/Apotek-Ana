@@ -1,15 +1,15 @@
 /**
  * Ana Farma V2 - canonical master-data surfaces.
- * Run once in the V2 spreadsheet after V2Bootstrap.gs.
+ * Canonical headers mirror the Apps Script bootstrap and V2 Schema.js.
  * Non-destructive: only creates missing V2 sheets.
  */
 
 const AF_MASTER_SURFACES = {
   spreadsheetId: '1creA8S9UeQ5CIdp84U_dqBmhN1BdrDDea0FIGf3hnYo',
   sheets: {
-    Location: ['locationId','locationCode','name','active','createdAt','updatedAt'],
-    Supplier: ['supplierId','supplierCode','name','active','createdAt','updatedAt'],
-    ProductLocation: ['productLocationId','productId','locationId','isDefault','active','createdAt','updatedAt']
+    Location: ['LocationId','LocationCode','Name','Active','CreatedAt','UpdatedAt'],
+    Supplier: ['SupplierId','SupplierCode','Name','Active','CreatedAt','UpdatedAt'],
+    ProductLocation: ['ProductLocationId','ProductId','LocationId','IsDefault','Active','CreatedAt','UpdatedAt']
   }
 };
 
@@ -26,5 +26,5 @@ function ensureV2MasterSurfaces() {
     if (sh.getLastRow() === 0) sh.getRange(1,1,1,headers.length).setValues([headers]);
     sh.setFrozenRows(1);
   });
-  return {spreadsheetId:ss.getId(), created:created};
+  return {spreadsheetId:ss.getId(), created:created, canonical:true};
 }
