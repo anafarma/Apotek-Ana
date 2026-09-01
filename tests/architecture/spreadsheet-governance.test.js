@@ -21,7 +21,7 @@ test('stock and location rules remain distinct', () => {
   assert.match(governance, /locationPolicy.*MASTER_OR_TRANSFER/);
   assert.match(docs, /changing StockBalance alone is never considered a valid stock adjustment/i);
   assert.match(docs, /changing product-to-location assignment/i);
-  assert.match(docs, /physical stock movement requires a stock transfer workflow/i);
+  assert.match(docs, /physical stock movement(?: between locations)? requires a controlled stock-transfer workflow/i);
 });
 
 test('price never defines unit conversion', () => {
@@ -58,7 +58,7 @@ test('master edits cannot silently become transactional mutations', () => {
   assert.match(governance, /editableSurfaces/);
   assert.match(governance, /protectedSurfaces/);
   assert.match(docs, /Direct spreadsheet editing is therefore \*\*not an exception path\*\*/i);
-  assert.match(docs, /transactional history and stock mutations remain application owned/i);
+  assert.match(docs, /transactional history and stock mutations remain application-owned/i);
 });
 
 test('production remains outside the governance target', () => {
