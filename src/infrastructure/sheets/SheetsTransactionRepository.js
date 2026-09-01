@@ -9,12 +9,26 @@ export class SheetsTransactionRepository {
     if(r?.Status==='COMPLETED') return JSON.parse(r.ResultJson||'{}');
     if(r?.Status==='RECOVERY_REQUIRED') throw new Error('REQUEST_RECOVERY_REQUIRED');
     if(r?.Status!=='IN_PROGRESS') throw new Error(`REQUEST_NOT_COMMITTABLE:${r?.Status||'MISSING'}`);
+
     const journalId=this.ids.newId('JRN');
     const moves=this._movements(tx);
+
+    // All deterministic preconditions are checked before the transaction
+    // journal is prepared. A business rejection such as insufficient stock
+    // must become FAILED, never RECOVERY_REQUIRED, because no transactional
+    // mutation has occurred yet.
+    for(const m of moves) {
+      const balance=this._balance(m.productId);
+      if(balance<m.qtyBase) {
+        const error=Object.assign(new Error(`STOCK_INSUFFICIENT:${m.productId}`),{code:'STOCK_INSUFFICIENT'});
+        if(typeof this.requestLedger.fail==='function') this.requestLedger.fail(tx.requestId,error.code,this.now().toISOString());
+        throw error;
+      }
+    }
+
     const recovery={transactionId:tx.transactionId,requestId:tx.requestId,saleItemCount:tx.items.length,stockMovementIds:moves.map(x=>x.id),payment:true};
     this.journal.prepare({journalId,transactionId:tx.transactionId,requestId:tx.requestId,payloadHash:tx.requestFingerprint,preparedAt:tx.createdAt,recovery});
     try {
-      for(const m of moves) if(this._balance(m.productId)<m.qtyBase) throw new Error(`STOCK_INSUFFICIENT:${m.productId}`);
       this._append(V2_SHEETS.SALES,this._sale(tx));
       for(const i of tx.items) this._append(V2_SHEETS.SALE_ITEMS,[this.ids.newId('SI'),tx.transactionId,i.productId,i.productName,i.unitId,i.unitName,i.qty,i.conversionFactor,i.qtyBase,i.unitPrice,i.subtotal,i.priceId]);
       this._append(V2_SHEETS.PAYMENTS,[this.ids.newId('PAY'),tx.transactionId,tx.payment.method,tx.payment.amount,tx.createdAt]);
