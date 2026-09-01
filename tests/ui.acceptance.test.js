@@ -34,9 +34,8 @@ function runtimeHarness({apiUrl='',fetchImpl=async()=>({ok:true,json:async()=>({
   const storage=new Map([['ana-farma-v2-offline-queue',storedQueue]]);
   const document={getElementById:id=>elements[id]};
   const localStorage={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)};
-  const context={console,document,localStorage,structuredClone:globalThis.structuredClone,crypto:{randomUUID:()=> 'runtime-request-001'},Intl,Number,JSON,Date,fetch:fetchImpl,ANA_FARMA_V2_API:apiUrl};
-  context.globalThis=context;
-  vm.runInNewContext(js,context,{filename:'ui/app.js'}); return {elements,storage};
+  const context=vm.createContext({console,document,localStorage,structuredClone:globalThis.structuredClone,crypto:{randomUUID:()=> 'runtime-request-001'},Intl,Number,JSON,Date,fetch:fetchImpl,ANA_FARMA_V2_API:apiUrl});
+  vm.runInContext(js,context,{filename:'ui/app.js'}); return {elements,storage};
 }
 
 test('runtime UI selects Box and calculates the independent Box price', () => { const {elements}=runtimeHarness(); assert.match(elements.unitSelect.innerHTML,/Box \(10 Strip\)/); elements.unitSelect.value='OB0015-BOX'; elements.unitSelect.change(); assert.match(elements.unitPrice.textContent,/35\.000/); elements.qtyInput.value='1'; elements.addBtn.click(); assert.match(elements.cartBody.innerHTML,/Box \(10 Strip\)/); assert.match(elements.cartTotal.textContent,/35\.000/); });
