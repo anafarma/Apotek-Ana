@@ -8,10 +8,7 @@ function makeDeps({ commitSaleAtomic = async tx => ({ success: true, transaction
     requestLedger: {
       async claim(row) {
         const existing = requests.get(row.requestId);
-        if (existing) {
-          if (existing.fingerprint !== row.fingerprint) return { ...existing, fingerprint: existing.fingerprint };
-          return existing;
-        }
+        if (existing) return existing.fingerprint === row.fingerprint ? existing : { ...existing, fingerprint: existing.fingerprint };
         const record = { status: 'IN_PROGRESS', fingerprint: row.fingerprint };
         requests.set(row.requestId, record);
         return { status: 'CLAIMED', fingerprint: row.fingerprint };
@@ -71,26 +68,19 @@ test('same requestId with different payload is rejected', async () => {
   const d = makeDeps();
   const c = command({ requestId: 'req-mismatch' });
   await createSale(c, d);
-  await assert.rejects(
-    () => createSale({ ...c, payment: { method: 'cash', amount: 70000 } }, d),
-    error => error.code === 'REQUEST_PAYLOAD_MISMATCH'
-  );
+  await assert.rejects(() => createSale({ ...c, payment: { method: 'cash', amount: 70000 } }, d), error => error.code === 'REQUEST_PAYLOAD_MISMATCH');
 });
 
 test('insufficient payment is rejected before atomic commit', async () => {
   let commits = 0;
-  await assert.rejects(
-    () => createSale(command({ requestId: 'req-payment', items: [{ productId: 'amlodipine', unitId: 'strip', qty: 1 }], payment: { method: 'cash', amount: 3999 } }), makeDeps({ commitSaleAtomic: async tx => { commits++; return tx; } })),
-    error => error.code === 'INSUFFICIENT_PAYMENT'
-  );
+  await assert.rejects(() => createSale(command({ requestId: 'req-payment', items: [{ productId: 'amlodipine', unitId: 'strip', qty: 1 }], payment: { method: 'cash', amount: 3999 } }), makeDeps({ commitSaleAtomic: async tx => { commits++; return tx; } })), error => error.code === 'INSUFFICIENT_PAYMENT');
   assert.equal(commits, 0);
 });
 
 test('in-progress request is not executed twice', async () => {
   const d = makeDeps();
-  await d.requestLedger.claim({ requestId: 'req-busy', action: 'CREATE_SALE', fingerprint: 'fp', actorId: 'cashier-1', createdAt: new Date().toISOString() });
-  await assert.rejects(
-    () => createSale(command({ requestId: 'req-busy' }), d),
-    error => error.code === 'REQUEST_IN_PROGRESS'
-  );
+  const c = command({ requestId: 'req-busy' });
+  const fingerprint = JSON.stringify({ action: 'CREATE_SALE', requestId: c.requestId, shiftId: c.shiftId, customerId: null, discount: 0, tax: 0, payment: c.payment, items: c.items });
+  await d.requestLedger.claim({ requestId: c.requestId, action: 'CREATE_SALE', fingerprint, actorId: 'cashier-1', createdAt: new Date().toISOString() });
+  await assert.rejects(() => createSale(c, d), error => error.code === 'REQUEST_IN_PROGRESS');
 });
