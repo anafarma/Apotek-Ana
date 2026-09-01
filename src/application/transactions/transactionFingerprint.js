@@ -1,11 +1,9 @@
-import { createHash } from 'node:crypto';
-
 /**
- * Deterministic fingerprint of client intent. Server-resolved price, product
- * name and stock are intentionally excluded because they are not client authority.
+ * Produces a deterministic, runtime-neutral canonical payload for idempotency.
+ * Hashing is injected so Apps Script can use Utilities.computeDigest.
  */
-export function fingerprintSaleCommand(command) {
-  const canonical = {
+export function canonicalizeSaleCommand(command) {
+  return JSON.stringify({
     action: 'CREATE_SALE',
     requestId: command.requestId,
     shiftId: command.shiftId,
@@ -19,6 +17,10 @@ export function fingerprintSaleCommand(command) {
     items: [...command.items]
       .map(item => ({ productId: item.productId, unitId: item.unitId, qty: item.qty }))
       .sort((a, b) => `${a.productId}\u0000${a.unitId}`.localeCompare(`${b.productId}\u0000${b.unitId}`))
-  };
-  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  });
+}
+
+export function fingerprintWith(hashFn, command) {
+  if (typeof hashFn !== 'function') throw new Error('HASH_FUNCTION_REQUIRED');
+  return hashFn(canonicalizeSaleCommand(command));
 }
