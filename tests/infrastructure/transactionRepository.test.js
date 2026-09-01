@@ -17,6 +17,7 @@ class FakeRequestLedger {
   constructor(record){ this.record=record; this.calls=[]; }
   get(){ return this.record; }
   complete(...args){ this.calls.push(['complete',...args]); this.record={...this.record,Status:'COMPLETED',ResultJson:JSON.stringify(args[2]),TransactionId:args[1]}; }
+  fail(...args){ this.calls.push(['fail',...args]); this.record={...this.record,Status:'FAILED',ErrorCode:args[1],CompletedAt:args[2]}; }
   markRecoveryRequired(...args){ this.calls.push(['recovery',...args]); this.record={...this.record,Status:'RECOVERY_REQUIRED'}; }
 }
 class FakeJournal {
@@ -47,14 +48,18 @@ test('successful sale commit writes journal, sale, item, payment, stock ledger, 
   delete globalThis.LockService;
 });
 
-test('insufficient stock creates a recovery journal without writing sale records',()=>{
+test('insufficient stock is a normal business rejection: no journal or sale mutation and request becomes FAILED',()=>{
   lock(); const ss=new FakeSpreadsheet(); seedStock(ss,5); const request=new FakeRequestLedger({Status:'IN_PROGRESS'}); const journal=new FakeJournal();
   const repo=new SheetsTransactionRepository({spreadsheet:ss,requestLedger:request,journal,ids:ids(),now:()=>new Date('2026-09-01T02:01:00Z')});
-  assert.throws(()=>repo.commitSaleAtomic(tx()),/TRANSACTION_RECOVERY_REQUIRED/);
+  assert.throws(()=>repo.commitSaleAtomic(tx()),/STOCK_INSUFFICIENT:P1/);
   assert.equal(ss.getSheetByName(V2_SHEETS.SALES).rows.length,1);
   assert.equal(ss.getSheetByName(V2_SHEETS.SALE_ITEMS).rows.length,1);
-  assert.equal(journal.calls[0][0],'prepare'); assert.equal(journal.calls.at(-1)[0],'recovery');
-  assert.equal(request.calls.at(-1)[0],'recovery');
+  assert.equal(ss.getSheetByName(V2_SHEETS.PAYMENTS).rows.length,1);
+  assert.equal(ss.getSheetByName(V2_SHEETS.STOCK_LEDGER).rows.length,2);
+  assert.equal(ss.getSheetByName(V2_SHEETS.AUDIT_LOG).rows.length,1);
+  assert.equal(journal.calls.length,0);
+  assert.equal(request.calls.at(-1)[0],'fail');
+  assert.equal(request.record.Status,'FAILED');
   delete globalThis.LockService;
 });
 
