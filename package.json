@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests",
-    "test:domain": "node --test tests/domain"
+    "test:domain": "node --test tests/domain",
+    "test:ui": "node --test tests/ui.acceptance.test.js"
   },
   "engines": { "node": ">=20" }
 }
