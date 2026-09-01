@@ -31,9 +31,22 @@ test('UI payment gate rejects insufficient payment', () => {
   assert.match(js, /Pembayaran kurang/);
 });
 
-test('offline UI queues requests instead of pretending stock was committed', () => {
+test('offline UI queues requests and persists them until sync acknowledgement', () => {
   assert.match(js, /state\.queue\.push\(request\)/);
+  assert.match(js, /saveQueue\(\)/);
   assert.match(js, /stok belum dianggap terjual sampai sync berhasil/);
+  assert.match(js, /API V2 belum dikonfigurasi; queue dipertahankan dan TIDAK dihapus/);
+});
+
+test('sync preserves every unacknowledged request after a partial failure', () => {
+  assert.match(js, /state\.queue=pending\.slice\(i\)/);
+  assert.match(js, /Request yang belum di-acknowledge dipertahankan/);
+  assert.match(js, /state\.queue=\[\]/);
+});
+
+test('online UI does not claim persistence when no V2 API is configured', () => {
+  assert.match(js, /VALIDASI UI berhasil/);
+  assert.match(js, /TIDAK ditulis ke database/);
 });
 
 test('UI surfaces governed manual-master workflow', () => {
