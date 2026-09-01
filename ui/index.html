@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ana Farma V2 — Acceptance Harness</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Ana Farma V2</h1>
+      <p>Standalone acceptance harness — tidak terhubung Production.</p>
+    </div>
+    <div id="trustBadge" class="badge">MASTER: UNKNOWN</div>
+  </header>
+
+  <main>
+    <section class="card" aria-labelledby="saleTitle">
+      <div class="section-head"><h2 id="saleTitle">Penjualan</h2><span id="offlineBadge" class="badge">ONLINE</span></div>
+      <div class="grid">
+        <label>Obat<select id="productSelect"></select></label>
+        <label>Satuan<select id="unitSelect"></select></label>
+        <label>Qty<input id="qtyInput" type="number" min="1" step="1" value="1"></label>
+        <div class="metric"><span>Harga/unit</span><strong id="unitPrice">Rp0</strong></div>
+      </div>
+      <button id="addBtn" type="button">Tambah ke keranjang</button>
+      <div id="validation" class="validation" role="status" aria-live="polite"></div>
+      <table><thead><tr><th>Obat</th><th>Satuan</th><th>Qty</th><th>Harga</th><th>Total</th></tr></thead><tbody id="cartBody"></tbody></table>
+      <div class="checkout">
+        <strong>Total <span id="cartTotal">Rp0</span></strong>
+        <label>Bayar<input id="paymentInput" type="number" min="0" step="100" value="0"></label>
+        <button id="checkoutBtn" type="button">Selesaikan transaksi</button>
+      </div>
+      <div id="result" class="result" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="masterTitle">
+      <div class="section-head"><h2 id="masterTitle">Master Data — simulasi edit owner</h2><span>GOVERNED</span></div>
+      <p class="hint">Edit master boleh dilakukan owner. Transaksi, saldo stok, dan ledger tidak diedit dari UI ini.</p>
+      <div class="grid">
+        <label>Produk<input id="masterName" value="Amlodipine 10 mg"></label>
+        <label>Lokasi<select id="masterLocation"><option>BLKG-1-5</option><option>BLKG-2-4</option><option>SAMP-1-6</option></select></label>
+        <label>Harga strip<input id="stripPrice" type="number" value="4000"></label>
+        <label>Harga box<input id="boxPrice" type="number" value="35000"></label>
+      </div>
+      <button id="validateMasterBtn" type="button">Validasi perubahan master</button>
+      <div id="masterResult" class="result" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="offlineTitle">
+      <div class="section-head"><h2 id="offlineTitle">Offline Sync</h2></div>
+      <button id="toggleOfflineBtn" type="button">Simulasikan offline</button>
+      <button id="syncBtn" type="button">Sync queue</button>
+      <div id="queueResult" class="result" role="status" aria-live="polite">Queue: 0</div>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
