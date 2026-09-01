@@ -1,15 +1,13 @@
 /**
  * Ana Farma V2 - governed manual spreadsheet edit path.
  *
- * This is intentionally separate from transaction code. It allows the owner to
- * use Google Sheets as an administrative bulk-edit surface while keeping
- * transactional records application-owned.
+ * Google Sheets remains an approved administrative interface for canonical
+ * master data. Transactional history and stock mutations remain application
+ * owned. Direct edits are observed, validated and reconciled; they are never
+ * silently converted into transaction mutations.
  *
  * INSTALL ONCE IN THE V2 SPREADSHEET:
  *   installV2ManualEditGovernance()
- *
- * The install function creates an installable onEdit trigger. It does not
- * modify legacy data and does not create a trigger in Production.
  */
 
 const AF_MANUAL_EDIT = {
@@ -26,7 +24,8 @@ const AF_MANUAL_EDIT = {
     ProductUnit: ['productId','unitCode','unitName','conversionToBase','isBase','active'],
     ProductPrice: ['productUnitId','priceType','price','currency','effectiveFrom','effectiveTo','active'],
     Location: ['locationId','locationCode','name','active'],
-    Supplier: ['supplierId','supplierCode','name','active']
+    Supplier: ['supplierId','supplierCode','name','active'],
+    ProductLocation: ['productId','locationId','isDefault','active']
   }
 };
 
@@ -52,17 +51,17 @@ function installV2ManualEditGovernance() {
 
   const config = ss.getSheetByName(AF_MANUAL_EDIT.configSheet);
   if (config.getLastRow() === 1) {
-    config.getRange(2,1,6,3).setValues([
+    config.getRange(2,1,7,3).setValues([
       ['mode','GOVERNED_MANUAL_EDIT','Master-data edits are supported; transactional sheets remain application-owned.'],
       ['stockPolicy','LEDGER_ONLY','Never edit StockBalance directly to correct stock. Use a controlled adjustment workflow.'],
       ['deletePolicy','DEACTIVATE','Prefer active=false over deleting canonical master rows.'],
       ['pricePolicy','FUTURE_ONLY','Price edits affect future sales; committed SaleItem history never changes.'],
       ['unitPolicy','EXPLICIT_CONVERSION','Conversion must be a positive integer and is never inferred from price.'],
+      ['locationPolicy','MASTER_OR_TRANSFER','Changing ProductLocation is a master-data move; physical stock movement requires a stock transfer workflow.'],
       ['securityPolicy','GOOGLE_PERMISSION_PLUS_ROLE','Sheet permission is the first boundary; application authorization remains mandatory.']
     ]);
   }
 
-  // Avoid duplicate installable triggers when this function is run again.
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'v2ManualEditOnEdit') ScriptApp.deleteTrigger(t);
   });
@@ -95,7 +94,7 @@ function v2ManualEditOnEdit(e) {
     eventId, new Date(), actor, name, e.range.getA1Notation(),
     e.range.getRow(), e.range.getLastRow(), e.range.getColumn(), e.range.getLastColumn(),
     surface, result.status, result.issueCodes.join('|'), fp,
-    surface === 'PROTECTED_SYSTEM' ? 'Manual edit detected on application-owned surface' : ''
+    surface === 'PROTECTED_SYSTEM' ? 'Manual edit detected on application-owned surface; reconcile/recovery required.' : ''
   ]);
 
   if (result.issues.length) {
@@ -144,6 +143,10 @@ function v2ValidateEditedRange_(sh, range, surface) {
       if (sh.getName() === 'ProductPrice') {
         const price = Number(by.price);
         if (!Number.isFinite(price) || price < 0) issues.push({severity:'HIGH',ruleCode:'PRICE_INVALID',rowNumber,message:'price must be finite and non-negative.'});
+      }
+      if (sh.getName() === 'ProductLocation') {
+        if (!String(by.productId || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRODUCT_REQUIRED',rowNumber,message:'productId is required.'});
+        if (!String(by.locationId || '').trim()) issues.push({severity:'HIGH',ruleCode:'LOCATION_REQUIRED',rowNumber,message:'locationId is required.'});
       }
     }
   }
