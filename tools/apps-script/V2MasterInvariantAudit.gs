@@ -1,18 +1,16 @@
 /**
  * V2 canonical master maintenance.
- *
- * This is intentionally a separate command from transaction code. It lets an
- * owner paste new master rows without first knowing internal UUIDs, while the
- * system validates the resulting relationships before the app trusts them.
+ * Generates missing internal IDs and validates the canonical master surfaces.
  */
 
 function repairV2MasterIdsAndAudit() {
   const ss = SpreadsheetApp.openById('1creA8S9UeQ5CIdp84U_dqBmhN1BdrDDea0FIGf3hnYo');
   const surfaces = {
-    Product:'productId', ProductUnit:'productUnitId', ProductPrice:'priceId',
-    Location:'locationId', Supplier:'supplierId', ProductLocation:'productLocationId'
+    Products:'ProductId', ProductUnits:'UnitId', UnitConversions:'ConversionId', ProductPrices:'PriceId',
+    Location:'LocationId', Supplier:'SupplierId', ProductLocation:'ProductLocationId'
   };
   const repaired=[];
+
   Object.keys(surfaces).forEach(name=>{
     const sh=ss.getSheetByName(name);
     if(!sh||sh.getLastRow()<2)return;
@@ -20,7 +18,6 @@ function repairV2MasterIdsAndAudit() {
     const headers=values[0].map(String); const idx={}; headers.forEach((h,i)=>idx[h]=i);
     const keyCol=idx[surfaces[name]];
     if(keyCol==null)return;
-    const updates=[];
     for(let r=1;r<values.length;r++){
       if(String(values[r][keyCol]||'').trim())continue;
       const meaningful=values[r].some((v,i)=>i!==keyCol && String(v==null?'':v).trim()!=='');
@@ -32,44 +29,52 @@ function repairV2MasterIdsAndAudit() {
   });
 
   const issues=[];
-  const products=v2MasterRows_(ss,'Product','productId');
-  const units=v2MasterRows_(ss,'ProductUnit','productUnitId');
-  const prices=v2MasterRows_(ss,'ProductPrice','priceId');
-  const locations=v2MasterRows_(ss,'Location','locationId');
-  const productLocations=v2MasterRows_(ss,'ProductLocation','productLocationId');
+  const products=v2MasterRows_(ss,'Products','ProductId');
+  const units=v2MasterRows_(ss,'ProductUnits','UnitId');
+  const conversions=v2MasterRows_(ss,'UnitConversions','ConversionId');
+  const prices=v2MasterRows_(ss,'ProductPrices','PriceId');
+  const locations=v2MasterRows_(ss,'Location','LocationId');
+  const productLocations=v2MasterRows_(ss,'ProductLocation','ProductLocationId');
 
-  const productIds=new Set(products.map(x=>String(x.row.productId||'').trim()));
-  const locationIds=new Set(locations.map(x=>String(x.row.locationId||'').trim()));
-  const unitIds=new Set(units.map(x=>String(x.row.productUnitId||'').trim()));
-  const productBaseCount=new Map();
+  const productIds=new Set(products.map(x=>String(x.row.ProductId||'').trim()));
+  const locationIds=new Set(locations.map(x=>String(x.row.LocationId||'').trim()));
+  const unitIds=new Set(units.map(x=>String(x.row.UnitId||'').trim()));
+  const baseByProduct=new Map();
 
   units.forEach(x=>{
-    const p=String(x.row.productId||'').trim();
-    if(!productIds.has(p))issues.push(v2InvariantIssue_('HIGH','ProductUnit',x.rowNumber,'PRODUCT_FK_MISSING',x.row.productUnitId,'productId does not resolve.'));
-    const f=Number(x.row.conversionToBase);
-    if(!Number.isInteger(f)||f<=0)issues.push(v2InvariantIssue_('HIGH','ProductUnit',x.rowNumber,'CONVERSION_INVALID',x.row.productUnitId,'conversionToBase must be a positive integer.'));
-    if(String(x.row.active).toUpperCase()==='TRUE'&&String(x.row.isBase).toUpperCase()==='TRUE')productBaseCount.set(p,(productBaseCount.get(p)||0)+1);
+    const p=String(x.row.ProductId||'').trim();
+    if(!productIds.has(p))issues.push(v2InvariantIssue_('HIGH','ProductUnits',x.rowNumber,'PRODUCT_FK_MISSING',x.row.UnitId,'ProductId does not resolve.'));
+    if(String(x.row.Active).toUpperCase()==='TRUE'&&String(x.row.IsBaseUnit).toUpperCase()==='TRUE')baseByProduct.set(p,(baseByProduct.get(p)||0)+1);
   });
   products.forEach(x=>{
-    const p=String(x.row.productId||'').trim();
-    const code=String(x.row.productCode||'').trim().toUpperCase();
-    if(!code)issues.push(v2InvariantIssue_('HIGH','Product',x.rowNumber,'PRODUCT_CODE_REQUIRED',p,'productCode is required.'));
-    if(code&&products.filter(y=>String(y.row.productCode||'').trim().toUpperCase()===code).length>1)issues.push(v2InvariantIssue_('HIGH','Product',x.rowNumber,'DUPLICATE_PRODUCT_CODE',p,'productCode must be unique.'));
-    if(productBaseCount.get(p)!==1)issues.push(v2InvariantIssue_('HIGH','Product',x.rowNumber,'BASE_UNIT_CARDINALITY',p,'Each product must have exactly one active base unit.'));
+    const p=String(x.row.ProductId||'').trim();
+    const sku=String(x.row.Sku||'').trim().toUpperCase();
+    if(!sku)issues.push(v2InvariantIssue_('HIGH','Products',x.rowNumber,'SKU_REQUIRED',p,'Sku is required.'));
+    if(sku&&products.filter(y=>String(y.row.Sku||'').trim().toUpperCase()===sku).length>1)issues.push(v2InvariantIssue_('HIGH','Products',x.rowNumber,'DUPLICATE_SKU',p,'Sku must be unique.'));
+    if(baseByProduct.get(p)!==1)issues.push(v2InvariantIssue_('HIGH','Products',x.rowNumber,'BASE_UNIT_CARDINALITY',p,'Each product must have exactly one active base unit.'));
+  });
+  conversions.forEach(x=>{
+    const factor=Number(x.row.Factor);
+    if(!Number.isInteger(factor)||factor<=0)issues.push(v2InvariantIssue_('HIGH','UnitConversions',x.rowNumber,'CONVERSION_INVALID',x.row.ConversionId,'Factor must be a positive integer.'));
+    if(!productIds.has(String(x.row.ProductId||'').trim()))issues.push(v2InvariantIssue_('HIGH','UnitConversions',x.rowNumber,'PRODUCT_FK_MISSING',x.row.ConversionId,'ProductId does not resolve.'));
+    if(!unitIds.has(String(x.row.FromUnitId||'').trim()))issues.push(v2InvariantIssue_('HIGH','UnitConversions',x.rowNumber,'FROM_UNIT_FK_MISSING',x.row.ConversionId,'FromUnitId does not resolve.'));
+    if(!unitIds.has(String(x.row.ToUnitId||'').trim()))issues.push(v2InvariantIssue_('HIGH','UnitConversions',x.rowNumber,'TO_UNIT_FK_MISSING',x.row.ConversionId,'ToUnitId does not resolve.'));
+    if(String(x.row.FromUnitId)===String(x.row.ToUnitId))issues.push(v2InvariantIssue_('HIGH','UnitConversions',x.rowNumber,'SELF_CONVERSION_FORBIDDEN',x.row.ConversionId,'A unit cannot convert to itself.'));
   });
   prices.forEach(x=>{
-    const p=Number(x.row.price);
-    if(!Number.isFinite(p)||p<0)issues.push(v2InvariantIssue_('HIGH','ProductPrice',x.rowNumber,'PRICE_INVALID',x.row.priceId,'price must be finite and non-negative.'));
-    if(!unitIds.has(String(x.row.productUnitId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductPrice',x.rowNumber,'PRODUCT_UNIT_FK_MISSING',x.row.priceId,'productUnitId does not resolve.'));
+    const p=Number(x.row.Price);
+    if(!Number.isFinite(p)||p<0)issues.push(v2InvariantIssue_('HIGH','ProductPrices',x.rowNumber,'PRICE_INVALID',x.row.PriceId,'Price must be finite and non-negative.'));
+    if(!productIds.has(String(x.row.ProductId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductPrices',x.rowNumber,'PRODUCT_FK_MISSING',x.row.PriceId,'ProductId does not resolve.'));
+    if(!unitIds.has(String(x.row.UnitId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductPrices',x.rowNumber,'UNIT_FK_MISSING',x.row.PriceId,'UnitId does not resolve.'));
   });
   productLocations.forEach(x=>{
-    if(!productIds.has(String(x.row.productId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductLocation',x.rowNumber,'PRODUCT_FK_MISSING',x.row.productLocationId,'productId does not resolve.'));
-    if(!locationIds.has(String(x.row.locationId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductLocation',x.rowNumber,'LOCATION_FK_MISSING',x.row.productLocationId,'locationId does not resolve.'));
+    if(!productIds.has(String(x.row.ProductId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductLocation',x.rowNumber,'PRODUCT_FK_MISSING',x.row.ProductLocationId,'ProductId does not resolve.'));
+    if(!locationIds.has(String(x.row.LocationId||'').trim()))issues.push(v2InvariantIssue_('HIGH','ProductLocation',x.rowNumber,'LOCATION_FK_MISSING',x.row.ProductLocationId,'LocationId does not resolve.'));
   });
 
   const issueSheet=v2InvariantSheet_(ss);
   if(issues.length){const out=issues.map(x=>[Utilities.getUuid(),new Date(),x.severity,x.sheetName,x.rowNumber,x.ruleCode,x.entityKey,x.message,'OPEN','','']);issueSheet.getRange(issueSheet.getLastRow()+1,1,out.length,11).setValues(out);}
-  return {ok:issues.length===0,repairedIds:repaired.length,issues:issues.length};
+  return {ok:issues.length===0,repairedIds:repaired.length,issues:issues.length,canonical:true};
 }
 
 function v2MasterRows_(ss,name,key){
