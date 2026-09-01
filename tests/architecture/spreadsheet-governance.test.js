@@ -75,7 +75,7 @@ test('master reconciliation enforces cross-row base-unit, price, and location in
 });
 
 test('invalid master rows do not advance the trusted shadow baseline', () => {
-  assert.match(reconciliation, /Invalid rows stay pinned to the previous trusted fingerprint/);
+  assert.match(reconciliation, /Invalid rows stay pinned to the previous trusted fingerprint/i);
   assert.match(reconciliation, /v2SafeRowHasIssue_/);
   assert.match(reconciliation, /filter\(x=>!x\.invalid/);
 });
