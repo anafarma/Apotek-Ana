@@ -9,6 +9,7 @@ const governance = read('tools/apps-script/V2ManualEditGovernance.gs');
 const maintenance = read('tools/apps-script/V2GovernanceMaintenance.gs');
 const orchestrator = read('tools/apps-script/V2SetupOrchestrator.gs');
 const bootstrap = read('tools/apps-script/V2Bootstrap.gs');
+const reconciliation = read('tools/apps-script/V2MasterReconciliationSafe.gs');
 const docs = read('docs/40-spreadsheet-manual-edit-governance.md');
 
 test('master sheets are the approved manual-edit boundary', () => {
@@ -64,4 +65,17 @@ test('master edits cannot silently become transactional mutations', () => {
 test('production remains outside the governance target', () => {
   assert.match(docs, /Production/i);
   assert.match(bootstrap, /non-destructive/i);
+});
+
+test('master reconciliation enforces cross-row base-unit, price, and location invariants', () => {
+  assert.match(reconciliation, /v2SafeValidateCrossRowInvariants_/);
+  assert.match(reconciliation, /ACTIVE_BASE_UNIT_COUNT_INVALID/);
+  assert.match(reconciliation, /DUPLICATE_ACTIVE_PRICE/);
+  assert.match(reconciliation, /DUPLICATE_ACTIVE_PRODUCT_LOCATION/);
+});
+
+test('invalid master rows do not advance the trusted shadow baseline', () => {
+  assert.match(reconciliation, /Invalid rows stay pinned to the previous trusted fingerprint/);
+  assert.match(reconciliation, /v2SafeRowHasIssue_/);
+  assert.match(reconciliation, /filter\(x=>!x\.invalid/);
 });
