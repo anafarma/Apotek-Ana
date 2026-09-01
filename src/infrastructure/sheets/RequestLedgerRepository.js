@@ -3,7 +3,8 @@ import { withDocumentLock } from './withLock.js';
 
 /** Google Sheets adapter for the authoritative idempotency ledger. */
 export class SheetsRequestLedgerRepository {
-  constructor(spreadsheet) { this.ss = spreadsheet; }
+  static IN_PROGRESS_LEASE_MS = 10 * 60 * 1000;
+  constructor(spreadsheet, { now = () => new Date() } = {}) { this.ss = spreadsheet; this.now = now; }
   _sheet() {
     const s = this.ss.getSheetByName(V2_SHEETS.REQUEST_LEDGER);
     if (!s) throw new Error('REQUEST_LEDGER_SHEET_MISSING');
@@ -24,8 +25,9 @@ export class SheetsRequestLedgerRepository {
 
   /**
    * Claim is a compare-and-insert operation. The read and append MUST happen
-   * under the same document lock; otherwise two concurrent Apps Script
-   * executions can both observe an absent RequestId and create duplicates.
+   * under the same document lock. A stale IN_PROGRESS request is never
+   * silently reclaimed because doing so could duplicate a partially committed
+   * sale; it is escalated to RECOVERY_REQUIRED instead.
    */
   claim({ requestId, fingerprint, payloadHash, action, createdAt }) {
     const hash = fingerprint ?? payloadHash;
@@ -37,7 +39,14 @@ export class SheetsRequestLedgerRepository {
         const record = this._record(existing);
         if (String(record.PayloadHash) !== String(hash)) throw new Error('IDEMPOTENCY_CONFLICT');
         if (record.Status === 'COMPLETED') return { status: 'COMPLETED', fingerprint: record.PayloadHash, result: this._json(record.ResultJson), record };
-        if (record.Status === 'IN_PROGRESS') return { status: 'IN_PROGRESS', fingerprint: record.PayloadHash, record };
+        if (record.Status === 'IN_PROGRESS') {
+          const createdMs = new Date(record.CreatedAt).getTime();
+          const nowMs = this.now().getTime();
+          if (!Number.isFinite(createdMs) || nowMs - createdMs >= SheetsRequestLedgerRepository.IN_PROGRESS_LEASE_MS) {
+            return { status: 'RECOVERY_REQUIRED', fingerprint: record.PayloadHash, record, reason: 'STALE_IN_PROGRESS' };
+          }
+          return { status: 'IN_PROGRESS', fingerprint: record.PayloadHash, record };
+        }
         if (record.Status === 'RECOVERY_REQUIRED') return { status: 'RECOVERY_REQUIRED', fingerprint: record.PayloadHash, record };
         if (record.Status === 'FAILED') return { status: 'FAILED', fingerprint: record.PayloadHash, record };
         throw new Error(`INVALID_REQUEST_STATUS:${record.Status}`);
