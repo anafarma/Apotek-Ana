@@ -1,10 +1,10 @@
 import { withDocumentLock } from '../infrastructure/sheets/withLock.js';
 
 /**
- * Transaction boundary for V2 sales.
- * All authoritative values are resolved on the server while holding the
- * spreadsheet document lock. Persistence adapters are injected so domain
- * tests never depend on SpreadsheetApp.
+ * V2 sales transaction boundary.
+ * All authoritative product/unit/price/stock values are resolved server-side
+ * while holding the spreadsheet document lock. Persistence is injected so the
+ * transaction rules can be tested without SpreadsheetApp.
  */
 export class TransactionCoordinator {
   constructor({ requestLedger, journal, products, stock, sales, audit, clock = () => new Date(), idFactory }) {
@@ -24,20 +24,22 @@ export class TransactionCoordinator {
 
   _executeLocked(command) {
     const now = this.clock();
-    const claim = this.requestLedger.claim({
-      requestId: command.requestId,
-      payloadHash: command.payloadHash,
-      action: command.action,
-      createdAt: now
-    });
+    const claim = this.requestLedger.claim({ requestId: command.requestId, payloadHash: command.payloadHash, action: command.action, createdAt: now });
     if (claim.status === 'COMPLETED') return JSON.parse(claim.record.ResultJson || '{}');
     if (claim.status === 'IN_PROGRESS') throw new Error('REQUEST_IN_PROGRESS');
+    if (claim.status === 'RECOVERY_REQUIRED') throw new Error('REQUEST_RECOVERY_REQUIRED');
 
     const transactionId = this.idFactory('TR');
     const journalId = this.idFactory('JRN');
-    const plan = this._validateAndPlan(command);
-    const recovery = { transactionId, requestId: command.requestId, stockMovementIds: plan.stock.map(x => x.movementId) };
+    let plan;
+    try {
+      plan = this._validateAndPlan(command, transactionId);
+    } catch (error) {
+      this.requestLedger.fail(command.requestId, error.code || error.message || 'VALIDATION_FAILED', this.clock());
+      throw error;
+    }
 
+    const recovery = { transactionId, requestId: command.requestId, stockMovementIds: plan.stock.map(x => x.movementId) };
     this.journal.prepare({ journalId, transactionId, requestId: command.requestId, payloadHash: command.payloadHash, preparedAt: now, recovery });
     try {
       this.sales.appendSale(plan.sale);
@@ -50,12 +52,15 @@ export class TransactionCoordinator {
       return plan.result;
     } catch (error) {
       this.journal.markRecoveryRequired(journalId, recovery, error);
-      this.requestLedger.fail(command.requestId, 'TRANSACTION_RECOVERY_REQUIRED', this.clock());
+      this.requestLedger.markRecoveryRequired
+        ? this.requestLedger.markRecoveryRequired(command.requestId, 'TRANSACTION_RECOVERY_REQUIRED', this.clock())
+        : this.requestLedger.fail(command.requestId, 'TRANSACTION_RECOVERY_REQUIRED', this.clock());
       throw error;
     }
   }
 
-  _validateAndPlan(command) {
+  _validateAndPlan(command, transactionId) {
+    if (!command?.requestId || !command?.payloadHash || !command?.actorId) throw new Error('INVALID_REQUEST_CONTEXT');
     if (!Array.isArray(command.items) || command.items.length === 0) throw new Error('EMPTY_CART');
     if (command.items.length > 100) throw new Error('TOO_MANY_ITEMS');
     const aggregate = new Map();
@@ -76,6 +81,7 @@ export class TransactionCoordinator {
       if (!Number.isSafeInteger(lineSubtotal)) throw new Error('LINE_TOTAL_OVERFLOW');
       const prior = aggregate.get(product.id) || { productId: product.id, quantityBase: 0, balance: this.stock.getBalance(product.id) };
       prior.quantityBase += baseQty;
+      if (!Number.isSafeInteger(prior.quantityBase)) throw new Error('AGGREGATED_QUANTITY_OVERFLOW');
       aggregate.set(product.id, prior);
       items.push({ productId: product.id, sellingUnitId: unit.id, sellingUnit: unit.name, quantity: input.quantity, conversion: unit.conversion, quantityBase: baseQty, unitPrice: price.amount, subtotal: lineSubtotal });
       subtotal += lineSubtotal;
@@ -83,19 +89,20 @@ export class TransactionCoordinator {
     }
 
     for (const a of aggregate.values()) if (!Number.isSafeInteger(a.balance) || a.balance < a.quantityBase) throw new Error('INSUFFICIENT_STOCK');
-    const discount = command.discount || 0;
-    const tax = command.tax || 0;
+    const discount = command.discount === undefined ? 0 : command.discount;
+    const tax = command.tax === undefined ? 0 : command.tax;
     if (!Number.isSafeInteger(discount) || discount < 0 || discount > subtotal) throw new Error('INVALID_DISCOUNT');
     if (!Number.isSafeInteger(tax) || tax < 0) throw new Error('INVALID_TAX');
     const total = subtotal - discount + tax;
+    if (!Number.isSafeInteger(total) || total < 0) throw new Error('INVALID_TOTAL');
     const paid = command.paid === undefined ? total : command.paid;
     if (!Number.isSafeInteger(paid) || paid < total) throw new Error('INSUFFICIENT_PAYMENT');
 
-    const transactionId = this.idFactory('TR');
-    const sale = { transactionId, occurredAt: this.clock(), actorId: command.actorId, shiftId: command.shiftId || '', subtotal, discount, tax, total, paid, change: paid - total, paymentMethod: command.paymentMethod || 'Tunai' };
+    const occurredAt = this.clock();
+    const sale = { transactionId, requestId: command.requestId, occurredAt, actorId: command.actorId, shiftId: command.shiftId || '', subtotal, discount, tax, total, paid, change: paid - total, paymentMethod: command.paymentMethod || 'Tunai' };
     const stock = [];
-    for (const a of aggregate.values()) stock.push({ movementId: this.idFactory('SM'), transactionId, productId: a.productId, quantityBase: a.quantityBase, direction: 'OUT', type: 'SALE', occurredAt: sale.occurredAt, actorId: command.actorId, reason: 'Penjualan ' + transactionId });
-    const audit = [{ auditId: this.idFactory('AUD'), occurredAt: sale.occurredAt, actorId: command.actorId, action: 'SALE_COMMITTED', entityType: 'Sale', entityId: transactionId, requestId: command.requestId, metadata: { itemCount: items.length, total } }];
+    for (const a of aggregate.values()) stock.push({ movementId: this.idFactory('SM'), transactionId, productId: a.productId, quantityBase: a.quantityBase, direction: 'OUT', type: 'SALE', occurredAt, actorId: command.actorId, reason: 'Penjualan ' + transactionId });
+    const audit = [{ auditId: this.idFactory('AUD'), occurredAt, actorId: command.actorId, action: 'SALE_COMMITTED', entityType: 'Sale', entityId: transactionId, requestId: command.requestId, metadata: { itemCount: items.length, total } }];
     return { sale, items, payment: { transactionId, amount: paid, method: sale.paymentMethod }, stock, audit, result: { transactionId, subtotal, total, change: paid - total, items } };
   }
 }
