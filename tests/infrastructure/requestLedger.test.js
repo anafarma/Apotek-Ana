@@ -39,6 +39,20 @@ test('same RequestId with a different payload is rejected without append', async
   delete globalThis.LockService;
 });
 
+test('stale IN_PROGRESS is escalated to RECOVERY_REQUIRED instead of being silently retried', async()=>{
+  installLock();
+  const {SheetsRequestLedgerRepository}=await import('../../src/infrastructure/sheets/RequestLedgerRepository.js?lock-test-4');
+  const sheet=new FakeSheet();
+  const now=new Date('2026-09-01T01:00:00Z');
+  const repo=new SheetsRequestLedgerRepository(new FakeSpreadsheet(sheet),{now:()=>now});
+  repo.claim({requestId:'REQ-4',fingerprint:'HASH-4',action:'CREATE_SALE',createdAt:'2026-09-01T00:00:00Z'});
+  const result=repo.claim({requestId:'REQ-4',fingerprint:'HASH-4',action:'CREATE_SALE',createdAt:'2026-09-01T01:00:00Z'});
+  assert.equal(result.status,'RECOVERY_REQUIRED');
+  assert.equal(result.reason,'STALE_IN_PROGRESS');
+  assert.equal(sheet.rows.length,2);
+  delete globalThis.LockService;
+});
+
 test('lock acquisition failure prevents the claim from mutating the sheet', async()=>{
   installLock({acquire:false});
   const {SheetsRequestLedgerRepository}=await import('../../src/infrastructure/sheets/RequestLedgerRepository.js?lock-test-3');
