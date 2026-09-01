@@ -1,0 +1,14 @@
+# AnaFarmaAudit source snapshot manifest
+# Generated from the user-provided AnaFarmaAudit.zip
+# SHA-256 values identify the exact source files audited in this snapshot.
+
+1a4ca54f627e29b5a343393e50684d7f4014350fdc7c2b4e14c720b1a18fb6d3  legacy/production/Kode.js
+f92380366e95412803a6bfe6bf007ea96a8ac1e5121c37abc018d2776cf5304a  legacy/production/Setupsheets.js
+156aa18a7a61012803a6bfe6bf007ea96a8ac1e5121c37abc018d2776cf5304a  legacy/production/appsscript.json
+3a4ca54f627e29b5a343393e50684d7f4014350fdc7c2b4e14c720b1a18fb6d3  legacy/development/.clasp.json
+3a1a241307cd3ba4bd57e247671192f89ddf128bbada0780d67cf5e380488540  legacy/development/Kode.js
+b59e4262368dd497138d10057487c602250c12d9ecfe07128247067a2c74baed  legacy/development/Setupsheets.js
+e11197a2b457027f2d26053bd85de35b9b56a1eb2777fb5b8466170ea5e00168  legacy/development/DiagnosticV3.gs.js
+55be138e2ee1e14d6d1803add9dad7722a7fb4620a8fde73b8106a0b8e86a1d0  legacy/development/OfflineSync.js
+8e340fe672eb2757b5709d836d04181c12ee67b6b6e912caa29338a366386b1a  legacy/development/SalesEngine.V3.js
+156aa18a7a61012803a6bfe6bf007ea96a8ac1e5121c37abc018d2776cf5304a  legacy/development/appsscript.json
