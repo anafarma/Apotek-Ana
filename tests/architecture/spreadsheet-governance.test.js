@@ -19,9 +19,9 @@ test('master sheets are the approved manual-edit boundary', () => {
 test('stock and location rules remain distinct', () => {
   assert.match(governance, /stockPolicy.*LEDGER_ONLY/);
   assert.match(governance, /locationPolicy.*MASTER_OR_TRANSFER/);
-  assert.match(docs, /StockBalance alone is never considered a valid stock adjustment/i);
-  assert.match(docs, /ProductLocation A -> B/);
-  assert.match(docs, /stock transfer A -> B/i);
+  assert.match(docs, /changing StockBalance alone is never considered a valid stock adjustment/i);
+  assert.match(docs, /changing product-to-location assignment/i);
+  assert.match(docs, /physical stock movement requires a stock transfer workflow/i);
 });
 
 test('price never defines unit conversion', () => {
@@ -44,6 +44,21 @@ test('one-click setup is hard-bound to V2 and installs all governance layers', (
   assert.match(orchestrator, /installV2ManualEditGovernance\(\)/);
   assert.match(orchestrator, /initializeV2MasterShadowSafe\(\)/);
   assert.match(orchestrator, /installV2GovernanceMaintenance\(\)/);
+});
+
+test('manual edit path is observable, redacted, and non-destructive', () => {
+  assert.match(governance, /v2ManualEditOnEdit/);
+  assert.match(governance, /postEditFingerprint/);
+  assert.match(governance, /PROTECTED_SURFACE_EDIT/);
+  assert.match(docs, /Passwords, tokens, secrets, cookies, authorization headers and credentials must never be written/i);
+  assert.match(docs, /does not overwrite an owner edit merely to restore an old snapshot/i);
+});
+
+test('master edits cannot silently become transactional mutations', () => {
+  assert.match(governance, /editableSurfaces/);
+  assert.match(governance, /protectedSurfaces/);
+  assert.match(docs, /Direct spreadsheet editing is therefore \*\*not an exception path\*\*/i);
+  assert.match(docs, /transactional history and stock mutations remain application owned/i);
 });
 
 test('production remains outside the governance target', () => {
