@@ -26,6 +26,10 @@ test('sync preserves every unacknowledged request after a partial failure', () =
   assert.match(js, /state\.queue=pending\.slice\(i\)/); assert.match(js, /Request yang belum di-acknowledge dipertahankan/); assert.match(js, /state\.queue=\[\]/);
 });
 test('online UI does not claim persistence when no V2 API is configured', () => { assert.match(js, /VALIDASI UI berhasil/); assert.match(js, /TIDAK ditulis ke database/); });
+test('UI sale request follows the V2 contract and omits server-authoritative fields', () => {
+  assert.match(js, /shiftId/); assert.match(js, /items: state\.cart\.map/); assert.match(js, /payment: \{ method/);
+  assert.doesNotMatch(js, /body:JSON\.stringify\(\{action:'createTransaksiV2', request:.*lines/);
+});
 test('UI surfaces governed manual-master workflow', () => { assert.match(html, /Master Data/); assert.match(js, /harga independen/); assert.match(js, /conversion Box tetap 10 Strip/); });
 test('UI does not expose transactional ledger editing controls', () => {
   assert.doesNotMatch(html, /StockLedger.*input/i); assert.doesNotMatch(html, /AuditLog.*input/i); assert.doesNotMatch(html, /RequestLedger.*input/i);
@@ -46,9 +50,9 @@ class FakeElement {
 }
 
 function runtimeHarness({apiUrl='', fetchImpl=async()=>({ok:true,json:async()=>({ok:true})}), storedQueue='[]'}={}){
-  const ids=['productSelect','unitSelect','qtyInput','unitPrice','addBtn','validation','cartBody','cartTotal','paymentInput','checkoutBtn','result','masterName','masterLocation','stripPrice','boxPrice','validateMasterBtn','masterResult','toggleOfflineBtn','syncBtn','queueResult','offlineBadge','trustBadge'];
+  const ids=['productSelect','unitSelect','qtyInput','unitPrice','addBtn','validation','cartBody','cartTotal','paymentMethod','paymentInput','checkoutBtn','result','masterName','masterLocation','stripPrice','boxPrice','validateMasterBtn','masterResult','toggleOfflineBtn','syncBtn','queueResult','offlineBadge','trustBadge'];
   const elements=Object.fromEntries(ids.map(id=>[id,new FakeElement(id)]));
-  elements.qtyInput.value='1'; elements.paymentInput.value='0'; elements.stripPrice.value='4000'; elements.boxPrice.value='35000';
+  elements.qtyInput.value='1'; elements.paymentInput.value='0'; elements.paymentMethod.value='CASH'; elements.stripPrice.value='4000'; elements.boxPrice.value='35000';
   const storage=new Map([['ana-farma-v2-offline-queue',storedQueue]]);
   const document={getElementById:id=>elements[id]};
   const localStorage={getItem:key=>storage.get(key) ?? null,setItem:(key,value)=>storage.set(key,value)};
@@ -70,13 +74,25 @@ test('runtime UI rejects insufficient payment before API call', async () => {
   elements.unitSelect.value='OB0015-STRIP'; elements.unitSelect.change(); elements.addBtn.click(); elements.paymentInput.value='3999'; await elements.checkoutBtn.click();
   assert.match(elements.result.textContent,/Pembayaran kurang/); assert.equal(calls,0);
 });
+test('runtime UI sends only server-authoritative-safe sale fields', async () => {
+  let body=null;
+  const {elements}=runtimeHarness({apiUrl:'https://v2.invalid/api',fetchImpl:async(_url,options)=>{body=JSON.parse(options.body);return {ok:true,json:async()=>({ok:true})};}});
+  elements.unitSelect.value='OB0015-BOX'; elements.unitSelect.change(); elements.addBtn.click(); elements.paymentInput.value='35000'; await elements.checkoutBtn.click();
+  const request=body.request;
+  assert.equal(body.action,'createTransaksiV2');
+  assert.equal(request.shiftId,'HARNESS-SHIFT-001');
+  assert.deepEqual(request.items,[{productId:'OB0015',unitId:'OB0015-BOX',qty:1}]);
+  assert.deepEqual(request.payment,{method:'CASH',amount:35000});
+  assert.equal(request.lines,undefined); assert.equal(request.total,undefined); assert.equal(request.paid,undefined);
+  assert.equal(request.items[0].price,undefined); assert.equal(request.items[0].conversion,undefined);
+});
 test('runtime UI queues offline sale and survives a reload', async () => {
   const first=runtimeHarness(); first.elements.unitSelect.value='OB0015-BOX'; first.elements.unitSelect.change(); first.elements.addBtn.click(); first.elements.paymentInput.value='35000'; first.elements.toggleOfflineBtn.click(); await first.elements.checkoutBtn.click();
   assert.match(first.elements.queueResult.textContent,/Queue: 1/); const persisted=first.storage.get('ana-farma-v2-offline-queue'); assert.match(persisted,/runtime-request-001/);
   const second=runtimeHarness({storedQueue:persisted}); assert.match(second.elements.queueResult.textContent,/Queue: 1/);
 });
 test('runtime UI keeps pending queue after API failure during sync', async () => {
-  const initial=JSON.stringify([{requestId:'r1',lines:[],total:1000,paid:1000},{requestId:'r2',lines:[],total:2000,paid:2000}]); let calls=0;
+  const initial=JSON.stringify([{requestId:'r1',shiftId:'s1',items:[],payment:{method:'CASH',amount:1000}},{requestId:'r2',shiftId:'s1',items:[],payment:{method:'CASH',amount:2000}}]); let calls=0;
   const {elements,storage}=runtimeHarness({apiUrl:'https://v2.invalid/api',storedQueue:initial,fetchImpl:async()=>{calls++;if(calls===1)return {ok:true,json:async()=>({ok:true})};throw new Error('temporary failure');}});
   await elements.syncBtn.click(); assert.match(elements.queueResult.textContent,/Queue: 1/); assert.match(storage.get('ana-farma-v2-offline-queue'),/r2/); assert.doesNotMatch(storage.get('ana-farma-v2-offline-queue'),/r1/);
 });
