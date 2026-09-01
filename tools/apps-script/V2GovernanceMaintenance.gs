@@ -37,12 +37,16 @@ function runV2GovernanceCycle() {
   const started = new Date();
   const runSheet = v2GovEnsureSheet_(ss, AF_GOV_MAINT.runSheet, ['runId','startedAt','finishedAt','status','issues','changed','message']);
   runSheet.appendRow([runId, started, '', 'RUNNING', '', '', '']);
+
   try {
-    // Safe ID generation is limited to missing IDs on canonical master rows.
+    // Generate IDs only for blank keys on canonical master rows.
     const repair = repairV2MasterIdsAndAudit();
-    const reconciliation = reconcileV2MasterData();
-    const invariant = repairV2MasterIdsAndAudit();
-    const issueCount = Number(reconciliation.issues || 0) + Number(invariant.issues || 0);
+
+    // Safe reconciliation is the authoritative scheduled path. It detects
+    // additions, changes, deletions and cross-reference violations without
+    // overwriting the owner's current spreadsheet values.
+    const reconciliation = reconcileV2MasterDataSafe();
+    const issueCount = Number(reconciliation.issues || 0) + Number(repair.issues || 0);
     const status = issueCount === 0 ? 'TRUSTED' : 'DEGRADED';
 
     const state = v2GovEnsureSheet_(ss, AF_GOV_MAINT.stateSheet, ['key','value','updatedAt']);
@@ -54,8 +58,8 @@ function runV2GovernanceCycle() {
     v2GovSetState_(state, 'transactionalSheetsManualWritePolicy', 'BLOCKED');
 
     const finished = new Date();
-    runSheet.getRange(runSheet.getLastRow(),1,1,7).setValues([[runId,started,finished,status,issueCount,reconciliation.changed || 0,'Master reconciliation completed']]);
-    return {ok:issueCount===0,status,runId,repair,invariant,reconciliation};
+    runSheet.getRange(runSheet.getLastRow(),1,1,7).setValues([[runId,started,finished,status,issueCount,reconciliation.changes || 0,'Master reconciliation completed']]);
+    return {ok:issueCount===0,status,runId,repair,reconciliation};
   } catch (err) {
     const finished = new Date();
     runSheet.getRange(runSheet.getLastRow(),1,1,7).setValues([[runId,started,finished,'ERROR','', '', String(err && err.message || err)]]);
