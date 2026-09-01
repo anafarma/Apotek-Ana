@@ -27,7 +27,7 @@ export class SheetsRequestLedgerRepository {
    * under the same document lock; otherwise two concurrent Apps Script
    * executions can both observe an absent RequestId and create duplicates.
    */
-  claim({ requestId, fingerprint, payloadHash, action, actorId = '', createdAt }) {
+  claim({ requestId, fingerprint, payloadHash, action, createdAt }) {
     const hash = fingerprint ?? payloadHash;
     if (!requestId || !hash || !action) throw new Error('INVALID_IDEMPOTENCY_CLAIM');
 
@@ -46,7 +46,7 @@ export class SheetsRequestLedgerRepository {
       const headers = V2_HEADERS[V2_SHEETS.REQUEST_LEDGER];
       const row = headers.map(h => ({
         RequestId: requestId, PayloadHash: hash, Action: action, Status: 'IN_PROGRESS', TransactionId: '', ResultJson: '',
-        ErrorCode: '', CreatedAt: createdAt, CompletedAt: '', ActorId: actorId
+        ErrorCode: '', CreatedAt: createdAt, CompletedAt: ''
       }[h] ?? ''));
       this._sheet().appendRow(row);
       return { status: 'CLAIMED', fingerprint: hash, record: this.get(requestId) };
