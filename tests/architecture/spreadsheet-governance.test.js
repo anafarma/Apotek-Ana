@@ -7,16 +7,13 @@ const root = process.cwd();
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const governance = read('tools/apps-script/V2ManualEditGovernance.gs');
 const maintenance = read('tools/apps-script/V2GovernanceMaintenance.gs');
+const orchestrator = read('tools/apps-script/V2SetupOrchestrator.gs');
 const bootstrap = read('tools/apps-script/V2Bootstrap.gs');
 const docs = read('docs/40-spreadsheet-manual-edit-governance.md');
 
 test('master sheets are the approved manual-edit boundary', () => {
-  for (const name of ['Product','ProductUnit','ProductPrice','Location','Supplier','ProductLocation']) {
-    assert.match(governance, new RegExp(name));
-  }
-  for (const name of ['StockLedger','StockBalance','Sale','SaleItem','Payment','RequestLedger','TransactionJournal','AuditLog','Reconciliation']) {
-    assert.match(governance, new RegExp(name));
-  }
+  for (const name of ['Product','ProductUnit','ProductPrice','Location','Supplier','ProductLocation']) assert.match(governance, new RegExp(name));
+  for (const name of ['StockLedger','StockBalance','Sale','SaleItem','Payment','RequestLedger','TransactionJournal','AuditLog','Reconciliation']) assert.match(governance, new RegExp(name));
 });
 
 test('stock and location rules remain distinct', () => {
@@ -38,6 +35,15 @@ test('governance has an explicit trust state and scheduled reconciliation', () =
   assert.match(maintenance, /masterDataTrust/);
   assert.match(maintenance, /DEGRADED/);
   assert.match(maintenance, /everyMinutes\(AF_GOV_MAINT\.intervalMinutes\)/);
+});
+
+test('one-click setup is hard-bound to V2 and installs all governance layers', () => {
+  assert.match(orchestrator, /AF_V2\.spreadsheetId/);
+  assert.match(orchestrator, /productionTouched: false/);
+  assert.match(orchestrator, /ensureV2MasterSurfaces\(\)/);
+  assert.match(orchestrator, /installV2ManualEditGovernance\(\)/);
+  assert.match(orchestrator, /initializeV2MasterShadowSafe\(\)/);
+  assert.match(orchestrator, /installV2GovernanceMaintenance\(\)/);
 });
 
 test('production remains outside the governance target', () => {
