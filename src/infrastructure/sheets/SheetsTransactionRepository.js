@@ -10,9 +10,6 @@ export class SheetsTransactionRepository {
     if(r?.Status==='RECOVERY_REQUIRED') throw new Error('REQUEST_RECOVERY_REQUIRED');
     if(r?.Status!=='IN_PROGRESS') throw new Error(`REQUEST_NOT_COMMITTABLE:${r?.Status||'MISSING'}`);
 
-    // The committed journal is authoritative for the rare case where the
-    // transaction was fully persisted but RequestLedger completion failed.
-    // Repairing the ledger is safe because the journal already proves commit.
     const committed=this.journal.getCommittedByRequestId?.(tx.requestId);
     if(committed) {
       if(committed.payloadHash && String(committed.payloadHash)!==String(tx.requestFingerprint)) throw new Error('IDEMPOTENCY_CONFLICT');
@@ -23,9 +20,6 @@ export class SheetsTransactionRepository {
 
     const journalId=this.ids.newId('JRN');
     const moves=this._movements(tx);
-
-    // Deterministic preconditions are checked before PREPARED. A business
-    // rejection must remain FAILED and must never enter recovery handling.
     for(const m of moves) {
       const balance=this._balance(m.productId);
       if(balance<m.qtyBase) {
@@ -44,10 +38,7 @@ export class SheetsTransactionRepository {
       for(const m of moves) this._append(V2_SHEETS.STOCK_LEDGER,[m.id,tx.transactionId,m.productId,m.qtyBase,'OUT','SALE',tx.createdAt,tx.actorId,`Penjualan ${tx.receiptNumber}`]);
       this._append(V2_SHEETS.AUDIT_LOG,[this.ids.newId('AUD'),tx.createdAt,tx.actorId,'SALE_COMMITTED','Sale',tx.transactionId,tx.requestId,JSON.stringify({total:tx.total,itemCount:tx.items.length})]);
       this._refreshBalance(moves,tx.createdAt);
-      const result={transactionId:tx.transactionId,status:'COMPLETED',items:tx.items,total:tx.total,createdAt:tx.createdAt,change:tx.payment.amount-tx.total};
-      // Persist result in the committed journal before attempting the request
-      // acknowledgement. If acknowledgement fails, the next retry can repair
-      // RequestLedger without duplicating any sale rows.
+      const result={transactionId:tx.transactionId,receiptNumber:tx.receiptNumber,status:'COMPLETED',items:tx.items,total:tx.total,subtotal:tx.subtotal,discount:tx.discount,tax:tx.tax,createdAt:tx.createdAt,timestamp:tx.createdAt,totals:{subtotal:tx.subtotal,discount:tx.discount,tax:tx.tax,total:tx.total},change:tx.payment.amount-tx.total};
       this.journal.commit(journalId,this.now().toISOString(),result);
       try {
         this.requestLedger.complete(tx.requestId,tx.transactionId,result,this.now().toISOString());
