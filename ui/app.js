@@ -83,20 +83,35 @@ async function sync(){
   if(state.offline){showResult('queueResult','Tidak dapat sync saat offline.','error');return;}
   if(!state.queue.length){renderQueue();return;}
   if(!API_URL){showResult('queueResult','API V2 belum dikonfigurasi; queue dipertahankan dan TIDAK dihapus.','error');return;}
-  const pending=[...state.queue], failed=[];
-  for(const request of pending){
-    try { await commitRequest(request); }
-    catch(error){ failed.push(request); showResult('queueResult',`Sync berhenti: ${error.message}. ${failed.length} request gagal dipertahankan.`,'error'); break; }
+  const pending=[...state.queue];
+  for(let i=0;i<pending.length;i++){
+    try {
+      await commitRequest(pending[i]);
+    } catch(error) {
+      state.queue=pending.slice(i);
+      saveQueue();
+      renderQueue();
+      showResult('queueResult',`Sync berhenti pada request ${i+1}/${pending.length}: ${error.message}. Request yang belum di-acknowledge dipertahankan.`,'error');
+      return;
+    }
   }
-  state.queue=failed.concat(pending.slice(failed.length + (failed.length ? 1 : 0)));
-  if(!failed.length) state.queue=[];
-  saveQueue();renderQueue();
-  if(!state.queue.length) showResult('queueResult',`${pending.length} request berhasil dikirim dan di-acknowledge API V2.`,'ok');
+  state.queue=[];
+  saveQueue();
+  renderQueue();
+  showResult('queueResult',`${pending.length} request berhasil dikirim dan di-acknowledge API V2.`,'ok');
 }
 function validateMaster(){
   const strip=Number($('stripPrice').value),box=Number($('boxPrice').value);
   if(strip<=0||box<=0){showResult('masterResult','Harga harus lebih besar dari nol.','error');return;}
   showResult('masterResult',`Valid. Strip ${rupiah(strip)} dan Box ${rupiah(box)} adalah harga independen; conversion Box tetap 10 Strip.`,'ok');
+}
+function addLine(){
+  const error=validateLine();
+  if(error){ $('validation').className='validation error'; $('validation').textContent=error; return; }
+  const p=selectedProduct(),u=selectedUnit(),qty=Number($('qtyInput').value);
+  state.cart.push({productId:p.id,unitId:u.id,name:p.name,unit:u.label,qty,conversion:u.conversion,price:u.price,total:qty*u.price});
+  $('validation').className='validation ok'; $('validation').textContent='Baris penjualan valid dan ditambahkan.';
+  renderCart();
 }
 
 $('productSelect').addEventListener('change',renderUnits);
@@ -107,12 +122,3 @@ $('toggleOfflineBtn').addEventListener('click',toggleOffline);
 $('syncBtn').addEventListener('click',sync);
 $('validateMasterBtn').addEventListener('click',validateMaster);
 renderProducts();renderCart();renderQueue();$('trustBadge').textContent=API_URL?'MASTER: API CONFIGURED':'MASTER: HARNESS ONLY';
-
-function addLine(){
-  const error=validateLine();
-  if(error){ $('validation').className='validation error'; $('validation').textContent=error; return; }
-  const p=selectedProduct(),u=selectedUnit(),qty=Number($('qtyInput').value);
-  state.cart.push({productId:p.id,unitId:u.id,name:p.name,unit:u.label,qty,conversion:u.conversion,price:u.price,total:qty*u.price});
-  $('validation').className='validation ok'; $('validation').textContent='Baris penjualan valid dan ditambahkan.';
-  renderCart();
-}
