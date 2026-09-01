@@ -2,7 +2,8 @@ export const V2_SHEETS = Object.freeze({
   PRODUCTS: 'Products', PRODUCT_UNITS: 'ProductUnits', UNIT_CONVERSIONS: 'UnitConversions', PRODUCT_PRICES: 'ProductPrices',
   STOCK_BALANCE: 'StockBalance', STOCK_LEDGER: 'StockLedger', SALES: 'Sales', SALE_ITEMS: 'SaleItems', PAYMENTS: 'Payments',
   REQUEST_LEDGER: 'RequestLedger', AUDIT_LOG: 'AuditLog', TRANSACTION_JOURNAL: 'TransactionJournal',
-  SCHEMA_VERSION: 'SchemaVersion', MIGRATION_RUN: 'MigrationRun', MIGRATION_QUARANTINE: 'MigrationQuarantine'
+  SCHEMA_VERSION: 'SchemaVersion', MIGRATION_RUN: 'MigrationRun', MIGRATION_QUARANTINE: 'MigrationQuarantine',
+  SHIFTS: 'Shifts', ACCESS: '_V2_ACCESS'
 });
 
 export const V2_HEADERS = Object.freeze({
@@ -20,7 +21,9 @@ export const V2_HEADERS = Object.freeze({
   [V2_SHEETS.TRANSACTION_JOURNAL]: ['JournalId','TransactionId','RequestId','State','PreparedAt','CommittedAt','PayloadHash','RecoveryJson'],
   [V2_SHEETS.SCHEMA_VERSION]: ['Version','AppliedAt'],
   [V2_SHEETS.MIGRATION_RUN]: ['RunId','StartedAt','CompletedAt','Status','Source','Target','SummaryJson'],
-  [V2_SHEETS.MIGRATION_QUARANTINE]: ['RunId','EntityType','SourceId','Reason','PayloadJson','CreatedAt']
+  [V2_SHEETS.MIGRATION_QUARANTINE]: ['RunId','EntityType','SourceId','Reason','PayloadJson','CreatedAt'],
+  [V2_SHEETS.SHIFTS]: ['ShiftId','ActorId','OpenedAt','OpeningCash','Status','ClosedAt','ClosingCash'],
+  [V2_SHEETS.ACCESS]: ['UserId','Email','Role','Capabilities','Active','CreatedAt','UpdatedAt']
 });
 
 export function ensureSheet_(spreadsheet, name, headers) {

@@ -9,23 +9,45 @@ export class SheetsTransactionRepository {
     if(r?.Status==='COMPLETED') return JSON.parse(r.ResultJson||'{}');
     if(r?.Status==='RECOVERY_REQUIRED') throw new Error('REQUEST_RECOVERY_REQUIRED');
     if(r?.Status!=='IN_PROGRESS') throw new Error(`REQUEST_NOT_COMMITTABLE:${r?.Status||'MISSING'}`);
+
+    const committed=this.journal.getCommittedByRequestId?.(tx.requestId);
+    if(committed) {
+      if(committed.payloadHash && String(committed.payloadHash)!==String(tx.requestFingerprint)) throw new Error('IDEMPOTENCY_CONFLICT');
+      if(!committed.result) throw new Error('COMMITTED_JOURNAL_RESULT_MISSING');
+      this.requestLedger.complete(tx.requestId,committed.transactionId,committed.result,this.now().toISOString());
+      return committed.result;
+    }
+
     const journalId=this.ids.newId('JRN');
     const moves=this._movements(tx);
+    for(const m of moves) {
+      const balance=this._balance(m.productId);
+      if(balance<m.qtyBase) {
+        const error=Object.assign(new Error(`STOCK_INSUFFICIENT:${m.productId}`),{code:'STOCK_INSUFFICIENT'});
+        if(typeof this.requestLedger.fail==='function') this.requestLedger.fail(tx.requestId,error.code,this.now().toISOString());
+        throw error;
+      }
+    }
+
     const recovery={transactionId:tx.transactionId,requestId:tx.requestId,saleItemCount:tx.items.length,stockMovementIds:moves.map(x=>x.id),payment:true};
     this.journal.prepare({journalId,transactionId:tx.transactionId,requestId:tx.requestId,payloadHash:tx.requestFingerprint,preparedAt:tx.createdAt,recovery});
     try {
-      for(const m of moves) if(this._balance(m.productId)<m.qtyBase) throw new Error(`STOCK_INSUFFICIENT:${m.productId}`);
       this._append(V2_SHEETS.SALES,this._sale(tx));
       for(const i of tx.items) this._append(V2_SHEETS.SALE_ITEMS,[this.ids.newId('SI'),tx.transactionId,i.productId,i.productName,i.unitId,i.unitName,i.qty,i.conversionFactor,i.qtyBase,i.unitPrice,i.subtotal,i.priceId]);
       this._append(V2_SHEETS.PAYMENTS,[this.ids.newId('PAY'),tx.transactionId,tx.payment.method,tx.payment.amount,tx.createdAt]);
       for(const m of moves) this._append(V2_SHEETS.STOCK_LEDGER,[m.id,tx.transactionId,m.productId,m.qtyBase,'OUT','SALE',tx.createdAt,tx.actorId,`Penjualan ${tx.receiptNumber}`]);
       this._append(V2_SHEETS.AUDIT_LOG,[this.ids.newId('AUD'),tx.createdAt,tx.actorId,'SALE_COMMITTED','Sale',tx.transactionId,tx.requestId,JSON.stringify({total:tx.total,itemCount:tx.items.length})]);
       this._refreshBalance(moves,tx.createdAt);
-      this.journal.commit(journalId,this.now().toISOString());
-      const result={transactionId:tx.transactionId,status:'COMPLETED',items:tx.items,total:tx.total,createdAt:tx.createdAt,change:tx.payment.amount-tx.total};
-      this.requestLedger.complete(tx.requestId,tx.transactionId,result,this.now().toISOString());
+      const result={transactionId:tx.transactionId,receiptNumber:tx.receiptNumber,status:'COMPLETED',items:tx.items,total:tx.total,subtotal:tx.subtotal,discount:tx.discount,tax:tx.tax,createdAt:tx.createdAt,timestamp:tx.createdAt,totals:{subtotal:tx.subtotal,discount:tx.discount,tax:tx.tax,total:tx.total},change:tx.payment.amount-tx.total};
+      this.journal.commit(journalId,this.now().toISOString(),result);
+      try {
+        this.requestLedger.complete(tx.requestId,tx.transactionId,result,this.now().toISOString());
+      } catch(e) {
+        throw Object.assign(new Error('REQUEST_COMPLETION_PENDING'),{code:'REQUEST_COMPLETION_PENDING',cause:e});
+      }
       return result;
     } catch(e) {
+      if(e?.code==='REQUEST_COMPLETION_PENDING') throw e;
       this.journal.markRecoveryRequired(journalId,recovery,e);
       this.requestLedger.markRecoveryRequired(tx.requestId,'TRANSACTION_RECOVERY_REQUIRED',this.now().toISOString());
       throw Object.assign(new Error('TRANSACTION_RECOVERY_REQUIRED'),{code:'TRANSACTION_RECOVERY_REQUIRED',cause:e});

@@ -1,9 +1,9 @@
 /**
  * Ana Farma V2 - master data shadow/reconciliation.
  *
- * Purpose: make direct spreadsheet editing safe without making the app depend
- * on edit triggers alone. This catches deletions and script/API writes that
- * do not produce onEdit events, and validates cross-row invariants.
+ * Canonical surface names mirror src/infrastructure/sheets/Schema.js.
+ * This catches deletions and script/API writes that do not produce onEdit
+ * events and validates cross-row invariants after manual spreadsheet edits.
  */
 
 const AF_RECON = {
@@ -11,14 +11,19 @@ const AF_RECON = {
   shadowSheet: '_V2_MASTER_SHADOW',
   issueSheet: '_V2_DATA_QUALITY_ISSUE',
   surfaces: {
-    Product: {key:'productId', required:['productCode','name'], numeric:['minimumStock']},
-    ProductUnit: {key:'productUnitId', required:['productId','unitCode','unitName'], numeric:['conversionToBase']},
-    ProductPrice: {key:'priceId', required:['productUnitId','priceType'], numeric:['price']},
-    Location: {key:'locationId', required:['locationCode','name']},
-    Supplier: {key:'supplierId', required:['supplierCode','name']},
-    ProductLocation: {key:'productLocationId', required:['productId','locationId']}
+    Products: {key:'ProductId', required:['Sku','Name']},
+    ProductUnits: {key:'UnitId', required:['ProductId','Name']},
+    UnitConversions: {key:'ConversionId', required:['ProductId','FromUnitId','ToUnitId'], numeric:['Factor']},
+    ProductPrices: {key:'PriceId', required:['ProductId','UnitId'], numeric:['Price']},
+    Location: {key:'LocationId', required:['LocationCode','Name']},
+    Supplier: {key:'SupplierId', required:['SupplierCode','Name']},
+    ProductLocation: {key:'ProductLocationId', required:['ProductId','LocationId']}
   }
 };
+
+function initializeV2MasterShadowSafe() {
+  return initializeV2MasterShadow();
+}
 
 function initializeV2MasterShadow() {
   const ss = SpreadsheetApp.openById(AF_RECON.spreadsheetId);
@@ -37,7 +42,7 @@ function initializeV2MasterShadow() {
   });
   if (sh.getLastRow() > 1) sh.getRange(2,1,sh.getLastRow()-1,6).clearContent();
   if (rows.length) sh.getRange(2,1,rows.length,6).setValues(rows);
-  return {rows:rows.length};
+  return {rows:rows.length,canonical:true};
 }
 
 function reconcileV2MasterData() {
@@ -48,7 +53,7 @@ function reconcileV2MasterData() {
     ['sheetName','rowKey','rowNumber','fingerprint','capturedAt','status']);
   const shadowRows = shadow.getLastRow() > 1 ? shadow.getRange(2,1,shadow.getLastRow()-1,6).getValues() : [];
   const shadowMap = new Map();
-  shadowRows.forEach(r => shadowMap.set(r[0]+'|'+r[1], {rowNumber:r[2],fingerprint:r[3],row:r}));
+  shadowRows.forEach(r => shadowMap.set(r[0]+'|'+r[1], {rowNumber:Number(r[2]),fingerprint:String(r[3])}));
   const issues = [];
   const currentKeys = new Set();
   const changed = [];
@@ -91,20 +96,16 @@ function reconcileV2MasterData() {
     issue.getRange(issue.getLastRow()+1,1,out.length,11).setValues(out);
   }
 
-  // Accept only rows that are currently valid into the next shadow baseline.
-  const invalidKeys = new Set(issues.map(x => x.sheetName+'|'+x.entityKey).filter(x => !x.endsWith('|')));
+  const invalidKeys = new Set(issues.map(x => x.sheetName+'|'+x.entityKey));
   changed.forEach(r => {
     if (!invalidKeys.has(r[0]+'|'+r[1])) {
       const existing = shadowMap.get(r[0]+'|'+r[1]);
-      if (existing) {
-        shadow.getRange(existing.rowNumber+1,1,1,6).setValues([r]);
-      } else {
-        shadow.appendRow(r);
-      }
+      if (existing) shadow.getRange(existing.rowNumber+1,1,1,6).setValues([r]);
+      else shadow.appendRow(r);
     }
   });
 
-  return {issues:issues.length,changed:changed.length,shadowRows:shadow.getLastRow()-1};
+  return {issues:issues.length,changed:changed.length,shadowRows:Math.max(0,shadow.getLastRow()-1),canonical:true};
 }
 
 function afReconValidateRow_(name,data,row,rowNumber,ss) {
@@ -118,27 +119,30 @@ function afReconValidateRow_(name,data,row,rowNumber,ss) {
     if (by[h] !== '' && by[h] != null && !Number.isFinite(Number(by[h]))) out.push(afReconIssue_('HIGH',name,rowNumber,'NUMERIC_FIELD_INVALID','',h+' must be numeric.'));
   });
 
-  if (name === 'ProductUnit') {
-    const f = Number(by.conversionToBase);
-    if (!Number.isInteger(f) || f <= 0) out.push(afReconIssue_('HIGH',name,rowNumber,'CONVERSION_INVALID',String(by.productUnitId),'conversionToBase must be a positive integer.'));
-    const product = afReconHasKey_(ss,'Product','productId',by.productId);
-    if (!product) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.productId),'productId does not resolve to Product.'));
+  if (name === 'Products') {
+    const sku = String(by.Sku || '').trim().toUpperCase();
+    if (sku && afReconCountValue_(ss,'Products','Sku',sku,true) > 1) out.push(afReconIssue_('HIGH',name,rowNumber,'DUPLICATE_SKU',sku,'Sku must be unique.'));
   }
-  if (name === 'ProductPrice') {
-    const p = Number(by.price);
-    if (!Number.isFinite(p) || p < 0) out.push(afReconIssue_('HIGH',name,rowNumber,'PRICE_INVALID',String(by.priceId),'price must be finite and non-negative.'));
-    if (!afReconHasKey_(ss,'ProductUnit','productUnitId',by.productUnitId)) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_UNIT_FK_MISSING',String(by.productUnitId),'productUnitId does not resolve to ProductUnit.'));
+  if (name === 'ProductUnits') {
+    if (!afReconHasKey_(ss,'Products','ProductId',by.ProductId)) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.ProductId),'ProductId does not resolve to Products.'));
   }
-  if (name === 'Product') {
-    const code = String(by.productCode || '').trim().toUpperCase();
-    if (code) {
-      const duplicates = afReconCountValue_(ss,'Product','productCode',code,true);
-      if (duplicates > 1) out.push(afReconIssue_('HIGH',name,rowNumber,'DUPLICATE_PRODUCT_CODE',code,'productCode must be unique.'));
-    }
+  if (name === 'UnitConversions') {
+    const factor = Number(by.Factor);
+    if (!Number.isInteger(factor) || factor <= 0) out.push(afReconIssue_('HIGH',name,rowNumber,'CONVERSION_INVALID',String(by.ConversionId),'Factor must be a positive integer.'));
+    if (!afReconHasKey_(ss,'Products','ProductId',by.ProductId)) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.ProductId),'ProductId does not resolve to Products.'));
+    if (!afReconHasKey_(ss,'ProductUnits','UnitId',by.FromUnitId)) out.push(afReconIssue_('HIGH',name,rowNumber,'FROM_UNIT_FK_MISSING',String(by.FromUnitId),'FromUnitId does not resolve to ProductUnits.'));
+    if (!afReconHasKey_(ss,'ProductUnits','UnitId',by.ToUnitId)) out.push(afReconIssue_('HIGH',name,rowNumber,'TO_UNIT_FK_MISSING',String(by.ToUnitId),'ToUnitId does not resolve to ProductUnits.'));
+    if (String(by.FromUnitId) === String(by.ToUnitId)) out.push(afReconIssue_('HIGH',name,rowNumber,'SELF_CONVERSION_FORBIDDEN',String(by.ConversionId),'A unit cannot convert to itself.'));
+  }
+  if (name === 'ProductPrices') {
+    const p = Number(by.Price);
+    if (!Number.isFinite(p) || p < 0) out.push(afReconIssue_('HIGH',name,rowNumber,'PRICE_INVALID',String(by.PriceId),'Price must be finite and non-negative.'));
+    if (!afReconHasKey_(ss,'Products','ProductId',by.ProductId)) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.ProductId),'ProductId does not resolve to Products.'));
+    if (!afReconHasKey_(ss,'ProductUnits','UnitId',by.UnitId)) out.push(afReconIssue_('HIGH',name,rowNumber,'UNIT_FK_MISSING',String(by.UnitId),'UnitId does not resolve to ProductUnits.'));
   }
   if (name === 'ProductLocation') {
-    if (!afReconHasKey_(ss,'Product','productId',by.productId)) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.productId),'productId does not resolve to Product.'));
-    if (!afReconHasKey_(ss,'Location','locationId',by.locationId)) out.push(afReconIssue_('HIGH',name,rowNumber,'LOCATION_FK_MISSING',String(by.locationId),'locationId does not resolve to Location.'));
+    if (!afReconHasKey_(ss,'Products','ProductId',by.ProductId)) out.push(afReconIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.ProductId),'ProductId does not resolve to Products.'));
+    if (!afReconHasKey_(ss,'Location','LocationId',by.LocationId)) out.push(afReconIssue_('HIGH',name,rowNumber,'LOCATION_FK_MISSING',String(by.LocationId),'LocationId does not resolve to Location.'));
   }
   return out;
 }

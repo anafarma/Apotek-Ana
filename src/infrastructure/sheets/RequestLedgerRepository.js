@@ -1,8 +1,10 @@
 import { V2_SHEETS, V2_HEADERS } from './Schema.js';
+import { withDocumentLock } from './withLock.js';
 
 /** Google Sheets adapter for the authoritative idempotency ledger. */
 export class SheetsRequestLedgerRepository {
-  constructor(spreadsheet) { this.ss = spreadsheet; }
+  static IN_PROGRESS_LEASE_MS = 10 * 60 * 1000;
+  constructor(spreadsheet, { now = () => new Date() } = {}) { this.ss = spreadsheet; this.now = now; }
   _sheet() {
     const s = this.ss.getSheetByName(V2_SHEETS.REQUEST_LEDGER);
     if (!s) throw new Error('REQUEST_LEDGER_SHEET_MISSING');
@@ -21,26 +23,43 @@ export class SheetsRequestLedgerRepository {
   _record(x) { return Object.fromEntries(x.headers.map((h, i) => [h, x.values[i]])); }
   get(requestId) { const x = this._row(requestId); return x ? this._record(x) : null; }
 
-  claim({ requestId, fingerprint, payloadHash, action, actorId = '', createdAt }) {
+  /**
+   * Claim is a compare-and-insert operation. The read and append MUST happen
+   * under the same document lock. A stale IN_PROGRESS request is never
+   * silently reclaimed because doing so could duplicate a partially committed
+   * sale; it is escalated to RECOVERY_REQUIRED instead.
+   */
+  claim({ requestId, fingerprint, payloadHash, action, createdAt }) {
     const hash = fingerprint ?? payloadHash;
     if (!requestId || !hash || !action) throw new Error('INVALID_IDEMPOTENCY_CLAIM');
-    const existing = this._row(requestId);
-    if (existing) {
-      const record = this._record(existing);
-      if (String(record.PayloadHash) !== String(hash)) throw new Error('IDEMPOTENCY_CONFLICT');
-      if (record.Status === 'COMPLETED') return { status: 'COMPLETED', fingerprint: record.PayloadHash, result: this._json(record.ResultJson), record };
-      if (record.Status === 'IN_PROGRESS') return { status: 'IN_PROGRESS', fingerprint: record.PayloadHash, record };
-      if (record.Status === 'RECOVERY_REQUIRED') return { status: 'RECOVERY_REQUIRED', fingerprint: record.PayloadHash, record };
-      if (record.Status === 'FAILED') return { status: 'FAILED', fingerprint: record.PayloadHash, record };
-      throw new Error(`INVALID_REQUEST_STATUS:${record.Status}`);
-    }
-    const headers = V2_HEADERS[V2_SHEETS.REQUEST_LEDGER];
-    const row = headers.map(h => ({
-      RequestId: requestId, PayloadHash: hash, Action: action, Status: 'IN_PROGRESS', TransactionId: '', ResultJson: '',
-      ErrorCode: '', CreatedAt: createdAt, CompletedAt: '', ActorId: actorId
-    }[h] ?? ''));
-    this._sheet().appendRow(row);
-    return { status: 'CLAIMED', fingerprint: hash, record: this.get(requestId) };
+
+    return withDocumentLock(() => {
+      const existing = this._row(requestId);
+      if (existing) {
+        const record = this._record(existing);
+        if (String(record.PayloadHash) !== String(hash)) throw new Error('IDEMPOTENCY_CONFLICT');
+        if (record.Status === 'COMPLETED') return { status: 'COMPLETED', fingerprint: record.PayloadHash, result: this._json(record.ResultJson), record };
+        if (record.Status === 'IN_PROGRESS') {
+          const createdMs = new Date(record.CreatedAt).getTime();
+          const nowMs = this.now().getTime();
+          if (!Number.isFinite(createdMs) || nowMs - createdMs >= SheetsRequestLedgerRepository.IN_PROGRESS_LEASE_MS) {
+            return { status: 'RECOVERY_REQUIRED', fingerprint: record.PayloadHash, record, reason: 'STALE_IN_PROGRESS' };
+          }
+          return { status: 'IN_PROGRESS', fingerprint: record.PayloadHash, record };
+        }
+        if (record.Status === 'RECOVERY_REQUIRED') return { status: 'RECOVERY_REQUIRED', fingerprint: record.PayloadHash, record };
+        if (record.Status === 'FAILED') return { status: 'FAILED', fingerprint: record.PayloadHash, record };
+        throw new Error(`INVALID_REQUEST_STATUS:${record.Status}`);
+      }
+
+      const headers = V2_HEADERS[V2_SHEETS.REQUEST_LEDGER];
+      const row = headers.map(h => ({
+        RequestId: requestId, PayloadHash: hash, Action: action, Status: 'IN_PROGRESS', TransactionId: '', ResultJson: '',
+        ErrorCode: '', CreatedAt: createdAt, CompletedAt: ''
+      }[h] ?? ''));
+      this._sheet().appendRow(row);
+      return { status: 'CLAIMED', fingerprint: hash, record: this.get(requestId) };
+    });
   }
 
   complete(requestId, transactionId, result, completedAt) {

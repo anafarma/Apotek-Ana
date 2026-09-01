@@ -1,11 +1,12 @@
 /**
  * Safe entrypoints for V2 master reconciliation.
- * This file supersedes the initial reconciliation draft without deleting it,
- * preserving Git history while giving the V2 spreadsheet a hardened path.
+ * Canonical surfaces mirror src/infrastructure/sheets/Schema.js.
  */
 
+const AF_SAFE_SPREADSHEET_ID = '1creA8S9UeQ5CIdp84U_dqBmhN1BdrDDea0FIGf3hnYo';
+
 function initializeV2MasterShadowSafe() {
-  const ss = SpreadsheetApp.openById('1creA8S9UeQ5CIdp84U_dqBmhN1BdrDDea0FIGf3hnYo');
+  const ss = SpreadsheetApp.openById(AF_SAFE_SPREADSHEET_ID);
   const shadow = v2SafeSheet_(ss,'_V2_MASTER_SHADOW',['sheetName','rowKey','rowNumber','fingerprint','capturedAt','status']);
   const surfaces = v2SafeSurfaces_();
   const rows = [];
@@ -20,11 +21,11 @@ function initializeV2MasterShadowSafe() {
   });
   if (shadow.getLastRow()>1) shadow.getRange(2,1,shadow.getLastRow()-1,6).clearContent();
   if (rows.length) shadow.getRange(2,1,rows.length,6).setValues(rows);
-  return {ok:true,rows:rows.length};
+  return {ok:true,rows:rows.length,canonical:true};
 }
 
 function reconcileV2MasterDataSafe() {
-  const ss = SpreadsheetApp.openById('1creA8S9UeQ5CIdp84U_dqBmhN1BdrDDea0FIGf3hnYo');
+  const ss = SpreadsheetApp.openById(AF_SAFE_SPREADSHEET_ID);
   const issue = v2SafeSheet_(ss,'_V2_DATA_QUALITY_ISSUE',['issueId','occurredAt','severity','sheetName','rowNumber','ruleCode','entityKey','message','status','eventId','resolvedAt']);
   const shadow = v2SafeSheet_(ss,'_V2_MASTER_SHADOW',['sheetName','rowKey','rowNumber','fingerprint','capturedAt','status']);
   const surfaces = v2SafeSurfaces_();
@@ -58,7 +59,6 @@ function reconcileV2MasterDataSafe() {
     });
   });
 
-  // Cross-row invariants cannot be validated safely one row at a time.
   v2SafeValidateCrossRowInvariants_(ss,datasets).forEach(x=>issues.push(x));
 
   old.forEach(r=>{
@@ -71,8 +71,8 @@ function reconcileV2MasterDataSafe() {
     issue.getRange(issue.getLastRow()+1,1,out.length,11).setValues(out);
   }
 
-  // Advance the shadow only for rows that are currently valid. Invalid rows stay
-  // pinned to the previous trusted fingerprint so the discrepancy remains visible.
+  // Invalid rows stay pinned to the previous trusted fingerprint. Only valid
+  // changes advance the trusted shadow baseline.
   validChanges.filter(x=>!x.invalid && !v2SafeRowHasIssue_(issues,x.name,x.rowNumber)).forEach(x=>{
     const previous=oldMap.get(x.name+'|'+x.key);
     const row=[x.name,x.key,x.rowNumber,x.fp,new Date(),'BASELINE'];
@@ -80,7 +80,7 @@ function reconcileV2MasterDataSafe() {
     else shadow.appendRow(row);
   });
 
-  return {ok:issues.length===0,issues:issues.length,changes:validChanges.length,shadowRows:Math.max(0,shadow.getLastRow()-1)};
+  return {ok:issues.length===0,issues:issues.length,changes:validChanges.length,shadowRows:Math.max(0,shadow.getLastRow()-1),canonical:true};
 }
 
 function v2SafeValidateRow_(ss,name,d,row,rowNumber) {
@@ -89,93 +89,65 @@ function v2SafeValidateRow_(ss,name,d,row,rowNumber) {
   const out=[];
   (cfg.required||[]).forEach(h=>{if(!String(by[h]==null?'':by[h]).trim())out.push(v2SafeIssue_('HIGH',name,rowNumber,'REQUIRED_FIELD_MISSING',String(by[cfg.key]||''),h+' is required.'));});
   (cfg.numeric||[]).forEach(h=>{if(by[h]!==''&&by[h]!=null&&!Number.isFinite(Number(by[h])))out.push(v2SafeIssue_('HIGH',name,rowNumber,'NUMERIC_FIELD_INVALID',String(by[cfg.key]||''),h+' must be numeric.'));});
-  if(name==='Product'){
-    const code=String(by.productCode||'').trim().toUpperCase();
-    if(code&&v2SafeCount_(ss,'Product','productCode',code,true)>1)out.push(v2SafeIssue_('HIGH',name,rowNumber,'DUPLICATE_PRODUCT_CODE',String(by.productId||''),'productCode must be unique.'));
-    if(String(by.defaultLocationId||'').trim()&&!v2SafeHas_(ss,'Location','locationId',by.defaultLocationId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'DEFAULT_LOCATION_FK_MISSING',String(by.productId||''),'defaultLocationId does not resolve.'));
+  if(name==='Products'){
+    const sku=String(by.Sku||'').trim().toUpperCase();
+    if(sku&&v2SafeCount_(ss,'Products','Sku',sku,true)>1)out.push(v2SafeIssue_('HIGH',name,rowNumber,'DUPLICATE_SKU',String(by.ProductId||''),'Sku must be unique.'));
   }
-  if(name==='ProductUnit'){
-    const f=Number(by.conversionToBase);
-    if(!Number.isInteger(f)||f<=0)out.push(v2SafeIssue_('HIGH',name,rowNumber,'CONVERSION_INVALID',String(by.productUnitId||''),'conversionToBase must be a positive integer.'));
-    if(!v2SafeHas_(ss,'Product','productId',by.productId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.productUnitId||''),'productId does not resolve.'));
+  if(name==='ProductUnits'){
+    if(!v2SafeHas_(ss,'Products','ProductId',by.ProductId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.UnitId||''),'ProductId does not resolve.'));
   }
-  if(name==='ProductPrice'){
-    const p=Number(by.price);
-    if(!Number.isFinite(p)||p<0)out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRICE_INVALID',String(by.priceId||''),'price must be finite and non-negative.'));
-    if(!v2SafeHas_(ss,'ProductUnit','productUnitId',by.productUnitId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_UNIT_FK_MISSING',String(by.priceId||''),'productUnitId does not resolve.'));
-    if(by.effectiveFrom && by.effectiveTo && new Date(by.effectiveTo)<new Date(by.effectiveFrom))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRICE_EFFECTIVE_RANGE_INVALID',String(by.priceId||''),'effectiveTo must not be earlier than effectiveFrom.'));
+  if(name==='UnitConversions'){
+    const f=Number(by.Factor);
+    if(!Number.isInteger(f)||f<=0)out.push(v2SafeIssue_('HIGH',name,rowNumber,'CONVERSION_INVALID',String(by.ConversionId||''),'Factor must be a positive integer.'));
+    if(!v2SafeHas_(ss,'Products','ProductId',by.ProductId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.ConversionId||''),'ProductId does not resolve.'));
+    if(!v2SafeHas_(ss,'ProductUnits','UnitId',by.FromUnitId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'FROM_UNIT_FK_MISSING',String(by.ConversionId||''),'FromUnitId does not resolve.'));
+    if(!v2SafeHas_(ss,'ProductUnits','UnitId',by.ToUnitId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'TO_UNIT_FK_MISSING',String(by.ConversionId||''),'ToUnitId does not resolve.'));
+    if(String(by.FromUnitId)===String(by.ToUnitId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'SELF_CONVERSION_FORBIDDEN',String(by.ConversionId||''),'A unit cannot convert to itself.'));
+  }
+  if(name==='ProductPrices'){
+    const p=Number(by.Price);
+    if(!Number.isFinite(p)||p<0)out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRICE_INVALID',String(by.PriceId||''),'Price must be finite and non-negative.'));
+    if(!v2SafeHas_(ss,'Products','ProductId',by.ProductId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.PriceId||''),'ProductId does not resolve.'));
+    if(!v2SafeHas_(ss,'ProductUnits','UnitId',by.UnitId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'UNIT_FK_MISSING',String(by.PriceId||''),'UnitId does not resolve.'));
+    if(by.EffectiveFrom&&by.EffectiveTo&&new Date(by.EffectiveTo)<new Date(by.EffectiveFrom))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRICE_EFFECTIVE_RANGE_INVALID',String(by.PriceId||''),'EffectiveTo must not be earlier than EffectiveFrom.'));
   }
   if(name==='ProductLocation'){
-    if(!v2SafeHas_(ss,'Product','productId',by.productId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.productLocationId||''),'productId does not resolve.'));
-    if(!v2SafeHas_(ss,'Location','locationId',by.locationId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'LOCATION_FK_MISSING',String(by.productLocationId||''),'locationId does not resolve.'));
+    if(!v2SafeHas_(ss,'Products','ProductId',by.ProductId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'PRODUCT_FK_MISSING',String(by.ProductLocationId||''),'ProductId does not resolve.'));
+    if(!v2SafeHas_(ss,'Location','LocationId',by.LocationId))out.push(v2SafeIssue_('HIGH',name,rowNumber,'LOCATION_FK_MISSING',String(by.ProductLocationId||''),'LocationId does not resolve.'));
   }
   return out;
 }
 
 function v2SafeValidateCrossRowInvariants_(ss,datasets) {
   const out=[];
-  const units=datasets.ProductUnit;
+  const units=datasets.ProductUnits;
   if(units){
-    const productIndex=new Map();
+    const byProduct=new Map();
     units.rows.forEach((row,i)=>{
-      const productId=String(row[units.index.productId]==null?'':row[units.index.productId]).trim();
-      const active=String(row[units.index.active]==null?'':row[units.index.active]).toLowerCase()==='true';
-      const isBase=String(row[units.index.isBase]==null?'':row[units.index.isBase]).toLowerCase()==='true';
-      if(!productId||!active) return;
-      if(!productIndex.has(productId))productIndex.set(productId,[]);
-      productIndex.get(productId).push({rowNumber:i+2,isBase});
+      const productId=String(row[units.index.ProductId]==null?'':row[units.index.ProductId]).trim();
+      const active=String(row[units.index.Active]==null?'':row[units.index.Active]).toLowerCase()==='true';
+      const base=String(row[units.index.IsBaseUnit]==null?'':row[units.index.IsBaseUnit]).toLowerCase()==='true';
+      if(!productId||!active)return;
+      if(!byProduct.has(productId))byProduct.set(productId,[]);
+      byProduct.get(productId).push({rowNumber:i+2,base});
     });
-    productIndex.forEach((rows,productId)=>{
-      const bases=rows.filter(x=>x.isBase);
-      if(bases.length!==1)out.push(v2SafeIssue_('HIGH','ProductUnit',bases[0]?bases[0].rowNumber:2,'ACTIVE_BASE_UNIT_COUNT_INVALID',productId,'Exactly one active base unit is required per product; found '+bases.length+'.'));
-    });
+    byProduct.forEach((rows,productId)=>{const bases=rows.filter(x=>x.base);if(bases.length!==1)out.push(v2SafeIssue_('HIGH','ProductUnits',bases[0]?.rowNumber||2,'ACTIVE_BASE_UNIT_COUNT_INVALID',productId,'Exactly one active base unit is required; found '+bases.length+'.'));});
   }
-
-  const prices=datasets.ProductPrice;
+  const prices=datasets.ProductPrices;
   if(prices){
-    const activePriceTypes=new Map();
-    prices.rows.forEach((row,i)=>{
-      const active=String(row[prices.index.active]==null?'':row[prices.index.active]).toLowerCase()==='true';
-      if(!active)return;
-      const unitId=String(row[prices.index.productUnitId]==null?'':row[prices.index.productUnitId]).trim();
-      const type=String(row[prices.index.priceType]==null?'':row[prices.index.priceType]).trim().toUpperCase();
-      if(!unitId||!type)return;
-      const key=unitId+'|'+type;
-      if(!activePriceTypes.has(key))activePriceTypes.set(key,[]);
-      activePriceTypes.get(key).push(i+2);
-    });
-    activePriceTypes.forEach((rows,key)=>{
-      if(rows.length>1)out.push(v2SafeIssue_('HIGH','ProductPrice',rows[1],'DUPLICATE_ACTIVE_PRICE',key,'Only one active price is allowed for the same productUnit and priceType unless future effective-dating policy explicitly permits version overlap.'));
-    });
+    const active=new Map();
+    prices.rows.forEach((row,i)=>{if(String(row[prices.index.Active]||'').toLowerCase()!=='true')return;const key=String(row[prices.index.ProductId]||'')+'|'+String(row[prices.index.UnitId]||'');if(!active.has(key))active.set(key,[]);active.get(key).push(i+2);});
+    active.forEach((rows,key)=>{if(rows.length>1)out.push(v2SafeIssue_('HIGH','ProductPrices',rows[1],'DUPLICATE_ACTIVE_PRICE',key,'Only one active price is allowed for the same product and selling unit.'));});
   }
-
   const locations=datasets.ProductLocation;
   if(locations){
     const seen=new Set();
-    locations.rows.forEach((row,i)=>{
-      const active=String(row[locations.index.active]==null?'':row[locations.index.active]).toLowerCase()==='true';
-      if(!active)return;
-      const productId=String(row[locations.index.productId]==null?'':row[locations.index.productId]).trim();
-      const locationId=String(row[locations.index.locationId]==null?'':row[locations.index.locationId]).trim();
-      const key=productId+'|'+locationId;
-      if(productId&&locationId){
-        if(seen.has(key))out.push(v2SafeIssue_('HIGH','ProductLocation',i+2,'DUPLICATE_ACTIVE_PRODUCT_LOCATION',key,'Duplicate active ProductLocation assignment.'));
-        seen.add(key);
-      }
-    });
+    locations.rows.forEach((row,i)=>{if(String(row[locations.index.Active]||'').toLowerCase()!=='true')return;const key=String(row[locations.index.ProductId]||'')+'|'+String(row[locations.index.LocationId]||'');if(seen.has(key))out.push(v2SafeIssue_('HIGH','ProductLocation',i+2,'DUPLICATE_ACTIVE_PRODUCT_LOCATION',key,'Duplicate active ProductLocation assignment.'));seen.add(key);});
   }
   return out;
 }
-
 function v2SafeRowHasIssue_(issues,sheetName,rowNumber){return issues.some(i=>i.sheetName===sheetName&&i.rowNumber===rowNumber);}
-function v2SafeSurfaces_(){return{
-  Product:{key:'productId',required:['productCode','name'],numeric:['minimumStock']},
-  ProductUnit:{key:'productUnitId',required:['productId','unitCode','unitName'],numeric:['conversionToBase']},
-  ProductPrice:{key:'priceId',required:['productUnitId','priceType'],numeric:['price']},
-  Location:{key:'locationId',required:['locationCode','name']},
-  Supplier:{key:'supplierId',required:['supplierCode','name']},
-  ProductLocation:{key:'productLocationId',required:['productId','locationId']}
-};}
+function v2SafeSurfaces_(){return{Products:{key:'ProductId',required:['Sku','Name']},ProductUnits:{key:'UnitId',required:['ProductId','Name']},UnitConversions:{key:'ConversionId',required:['ProductId','FromUnitId','ToUnitId'],numeric:['Factor']},ProductPrices:{key:'PriceId',required:['ProductId','UnitId'],numeric:['Price']},Location:{key:'LocationId',required:['LocationCode','Name']},Supplier:{key:'SupplierId',required:['SupplierCode','Name']},ProductLocation:{key:'ProductLocationId',required:['ProductId','LocationId']}};}
 function v2SafeRead_(sh,key){const values=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();const headers=values[0].map(String);const index={};headers.forEach((h,i)=>index[h]=i);return{headers,index,key,rows:values.slice(1)};}
 function v2SafeHas_(ss,sheet,key,value){const sh=ss.getSheetByName(sheet);if(!sh||sh.getLastRow()<2)return false;const d=v2SafeRead_(sh,key);const target=String(value==null?'':value).trim();return d.rows.some(r=>String(r[d.index[key]]==null?'':r[d.index[key]]).trim()===target);}
 function v2SafeCount_(ss,sheet,key,value,ci){const sh=ss.getSheetByName(sheet);if(!sh||sh.getLastRow()<2)return 0;const d=v2SafeRead_(sh,key);const target=ci?String(value).trim().toUpperCase():String(value).trim();return d.rows.filter(r=>{const v=String(r[d.index[key]]==null?'':r[d.index[key]]).trim();return(ci?v.toUpperCase():v)===target;}).length;}

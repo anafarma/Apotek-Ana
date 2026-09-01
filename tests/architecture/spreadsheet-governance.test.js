@@ -13,8 +13,8 @@ const reconciliation = read('tools/apps-script/V2MasterReconciliationSafe.gs');
 const docs = read('docs/40-spreadsheet-manual-edit-governance.md');
 
 test('master sheets are the approved manual-edit boundary', () => {
-  for (const name of ['Product','ProductUnit','ProductPrice','Location','Supplier','ProductLocation']) assert.match(governance, new RegExp(name));
-  for (const name of ['StockLedger','StockBalance','Sale','SaleItem','Payment','RequestLedger','TransactionJournal','AuditLog','Reconciliation']) assert.match(governance, new RegExp(name));
+  for (const name of ['Products','ProductUnits','UnitConversions','ProductPrices','Location','Supplier','ProductLocation']) assert.match(governance, new RegExp(name));
+  for (const name of ['StockLedger','StockBalance','Sales','SaleItems','Payments','RequestLedger','TransactionJournal','AuditLog']) assert.match(governance, new RegExp(name));
 });
 
 test('stock and location rules remain distinct', () => {
@@ -28,7 +28,8 @@ test('stock and location rules remain distinct', () => {
 test('price never defines unit conversion', () => {
   assert.match(governance, /EXPLICIT_CONVERSION/);
   assert.match(docs, /Never infer a BOX conversion from the price ratio/i);
-  assert.match(bootstrap, /conversionToBase/);
+  assert.match(bootstrap, /UnitConversions/);
+  assert.match(bootstrap, /Factor/);
 });
 
 test('governance has an explicit trust state and scheduled reconciliation', () => {
@@ -64,7 +65,7 @@ test('master edits cannot silently become transactional mutations', () => {
 
 test('production remains outside the governance target', () => {
   assert.match(docs, /Production/i);
-  assert.match(bootstrap, /non-destructive/i);
+  assert.match(bootstrap, /NON_DESTRUCTIVE/);
 });
 
 test('master reconciliation enforces cross-row base-unit, price, and location invariants', () => {

@@ -29,6 +29,7 @@
       <table><thead><tr><th>Obat</th><th>Satuan</th><th>Qty</th><th>Harga</th><th>Total</th></tr></thead><tbody id="cartBody"></tbody></table>
       <div class="checkout">
         <strong>Total <span id="cartTotal">Rp0</span></strong>
+        <label>Metode<select id="paymentMethod"><option value="CASH">Tunai</option><option value="QRIS">QRIS</option><option value="TRANSFER">Transfer</option></select></label>
         <label>Bayar<input id="paymentInput" type="number" min="0" step="100" value="0"></label>
         <button id="checkoutBtn" type="button">Selesaikan transaksi</button>
       </div>
