@@ -1,4 +1,4 @@
-import { buildSaleLine } from '../../src/domain/sales/sale-line.js';
+import { buildSaleLine } from '../../../src/domain/sales/sale-line.js';
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
