@@ -6,8 +6,7 @@
  * owned. Direct edits are observed, validated and reconciled; they are never
  * silently converted into transaction mutations.
  *
- * INSTALL ONCE IN THE V2 SPREADSHEET:
- *   installV2ManualEditGovernance()
+ * Canonical surface names mirror src/infrastructure/sheets/Schema.js.
  */
 
 const AF_MANUAL_EDIT = {
@@ -16,16 +15,17 @@ const AF_MANUAL_EDIT = {
   shadowSheet: '_V2_MASTER_SHADOW',
   configSheet: '_V2_EDIT_POLICY',
   protectedSurfaces: [
-    'StockLedger', 'StockBalance', 'Sale', 'SaleItem', 'Payment',
-    'RequestLedger', 'TransactionJournal', 'AuditLog', 'Reconciliation'
+    'StockLedger', 'StockBalance', 'Sales', 'SaleItems', 'Payments',
+    'RequestLedger', 'TransactionJournal', 'AuditLog', 'MigrationRun', 'MigrationQuarantine'
   ],
   editableSurfaces: {
-    Product: ['productCode','name','categoryId','active','minimumStock','defaultLocationId'],
-    ProductUnit: ['productId','unitCode','unitName','conversionToBase','isBase','active'],
-    ProductPrice: ['productUnitId','priceType','price','currency','effectiveFrom','effectiveTo','active'],
-    Location: ['locationId','locationCode','name','active'],
-    Supplier: ['supplierId','supplierCode','name','active'],
-    ProductLocation: ['productId','locationId','isDefault','active']
+    Products: ['Sku','Name','CategoryId','InventoryTrackingMode','Active'],
+    ProductUnits: ['ProductId','Name','Symbol','IsBaseUnit','CanSell','CanPurchase','Active'],
+    UnitConversions: ['ProductId','FromUnitId','ToUnitId','Factor','Active'],
+    ProductPrices: ['ProductId','UnitId','Price','Currency','EffectiveFrom','EffectiveTo','Active'],
+    Location: ['LocationCode','Name','Active'],
+    Supplier: ['SupplierCode','Name','Active'],
+    ProductLocation: ['ProductId','LocationId','IsDefault','Active']
   }
 };
 
@@ -54,9 +54,9 @@ function installV2ManualEditGovernance() {
     config.getRange(2,1,7,3).setValues([
       ['mode','GOVERNED_MANUAL_EDIT','Master-data edits are supported; transactional sheets remain application-owned.'],
       ['stockPolicy','LEDGER_ONLY','Never edit StockBalance directly to correct stock. Use a controlled adjustment workflow.'],
-      ['deletePolicy','DEACTIVATE','Prefer active=false over deleting canonical master rows.'],
+      ['deletePolicy','DEACTIVATE','Prefer Active=false over deleting canonical master rows.'],
       ['pricePolicy','FUTURE_ONLY','Price edits affect future sales; committed SaleItem history never changes.'],
-      ['unitPolicy','EXPLICIT_CONVERSION','Conversion must be a positive integer and is never inferred from price.'],
+      ['unitPolicy','EXPLICIT_CONVERSION','Conversion is maintained in UnitConversions and is never inferred from price.'],
       ['locationPolicy','MASTER_OR_TRANSFER','Changing ProductLocation is a master-data move; physical stock movement requires a stock transfer workflow.'],
       ['securityPolicy','GOOGLE_PERMISSION_PLUS_ROLE','Sheet permission is the first boundary; application authorization remains mandatory.']
     ]);
@@ -67,7 +67,7 @@ function installV2ManualEditGovernance() {
   });
   ScriptApp.newTrigger('v2ManualEditOnEdit').forSpreadsheet(ss).onEdit().create();
 
-  return {installed:true, spreadsheetId:ss.getId(), trigger:'v2ManualEditOnEdit'};
+  return {installed:true, spreadsheetId:ss.getId(), trigger:'v2ManualEditOnEdit', canonical:true};
 }
 
 function v2ManualEditOnEdit(e) {
@@ -132,21 +132,27 @@ function v2ValidateEditedRange_(sh, range, surface) {
       const row = sh.getRange(rowNumber,1,1,sh.getLastColumn()).getValues()[0];
       const by = {};
       headers.forEach((h,i) => by[h] = row[i]);
-      if (sh.getName() === 'Product') {
-        if (!String(by.productCode || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRODUCT_CODE_REQUIRED',rowNumber,message:'productCode is required.'});
-        if (by.minimumStock !== '' && (!Number.isFinite(Number(by.minimumStock)) || Number(by.minimumStock) < 0)) issues.push({severity:'HIGH',ruleCode:'MINIMUM_STOCK_INVALID',rowNumber,message:'minimumStock must be a non-negative number.'});
+      if (sh.getName() === 'Products') {
+        if (!String(by.Sku || '').trim()) issues.push({severity:'HIGH',ruleCode:'SKU_REQUIRED',rowNumber,message:'Sku is required.'});
+        if (!String(by.Name || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRODUCT_NAME_REQUIRED',rowNumber,message:'Name is required.'});
       }
-      if (sh.getName() === 'ProductUnit') {
-        const factor = Number(by.conversionToBase);
-        if (!Number.isInteger(factor) || factor <= 0) issues.push({severity:'HIGH',ruleCode:'CONVERSION_INVALID',rowNumber,message:'conversionToBase must be a positive integer.'});
+      if (sh.getName() === 'ProductUnits') {
+        if (!String(by.ProductId || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRODUCT_REQUIRED',rowNumber,message:'ProductId is required.'});
+        if (!String(by.Name || '').trim()) issues.push({severity:'HIGH',ruleCode:'UNIT_NAME_REQUIRED',rowNumber,message:'Name is required.'});
       }
-      if (sh.getName() === 'ProductPrice') {
-        const price = Number(by.price);
-        if (!Number.isFinite(price) || price < 0) issues.push({severity:'HIGH',ruleCode:'PRICE_INVALID',rowNumber,message:'price must be finite and non-negative.'});
+      if (sh.getName() === 'UnitConversions') {
+        const factor = Number(by.Factor);
+        if (!Number.isInteger(factor) || factor <= 0) issues.push({severity:'HIGH',ruleCode:'CONVERSION_INVALID',rowNumber,message:'Factor must be a positive integer.'});
+        if (!String(by.ProductId || '').trim() || !String(by.FromUnitId || '').trim() || !String(by.ToUnitId || '').trim()) issues.push({severity:'HIGH',ruleCode:'CONVERSION_REFERENCE_REQUIRED',rowNumber,message:'ProductId, FromUnitId and ToUnitId are required.'});
+      }
+      if (sh.getName() === 'ProductPrices') {
+        const price = Number(by.Price);
+        if (!Number.isFinite(price) || price < 0) issues.push({severity:'HIGH',ruleCode:'PRICE_INVALID',rowNumber,message:'Price must be finite and non-negative.'});
+        if (!String(by.ProductId || '').trim() || !String(by.UnitId || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRICE_REFERENCE_REQUIRED',rowNumber,message:'ProductId and UnitId are required.'});
       }
       if (sh.getName() === 'ProductLocation') {
-        if (!String(by.productId || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRODUCT_REQUIRED',rowNumber,message:'productId is required.'});
-        if (!String(by.locationId || '').trim()) issues.push({severity:'HIGH',ruleCode:'LOCATION_REQUIRED',rowNumber,message:'locationId is required.'});
+        if (!String(by.ProductId || '').trim()) issues.push({severity:'HIGH',ruleCode:'PRODUCT_REQUIRED',rowNumber,message:'ProductId is required.'});
+        if (!String(by.LocationId || '').trim()) issues.push({severity:'HIGH',ruleCode:'LOCATION_REQUIRED',rowNumber,message:'LocationId is required.'});
       }
     }
   }
