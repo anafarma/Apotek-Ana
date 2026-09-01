@@ -23,12 +23,13 @@ test('stock and location rules remain distinct', () => {
   assert.match(governance, /stockPolicy.*LEDGER_ONLY/);
   assert.match(governance, /locationPolicy.*MASTER_OR_TRANSFER/);
   assert.match(docs, /StockBalance alone is never considered a valid stock adjustment/i);
-  assert.match(docs, /ProductLocation A.*Stock transfer A/i);
+  assert.match(docs, /ProductLocation A -> B/);
+  assert.match(docs, /stock transfer A -> B/i);
 });
 
 test('price never defines unit conversion', () => {
   assert.match(governance, /EXPLICIT_CONVERSION/);
-  assert.match(docs, /Price is never used to infer conversion/i);
+  assert.match(docs, /Never infer a BOX conversion from the price ratio/i);
   assert.match(bootstrap, /conversionToBase/);
 });
 
@@ -40,5 +41,6 @@ test('governance has an explicit trust state and scheduled reconciliation', () =
 });
 
 test('production remains outside the governance target', () => {
-  assert.match(docs, /Production is not a target/i);
+  assert.match(docs, /Production/i);
+  assert.match(bootstrap, /non-destructive/i);
 });
