@@ -1,17 +1,16 @@
 /**
  * Ana Farma V2 - non-destructive Spreadsheet bootstrap.
  *
- * PURPOSE
- * - Establish canonical V2 tables beside the copied legacy workbook.
- * - Never rename/delete/clear legacy sheets.
- * - Capture a structural baseline and data-quality metrics.
+ * Canonical sheet names/headers intentionally mirror src/infrastructure/sheets/Schema.js.
+ * This file is the Apps Script deployment-side representation of that contract.
  *
  * RUN
  *   bootstrapV2Database()
  *   auditLegacyWorkbook()
  *
- * The script is intentionally standalone so it can be attached to the V2 copy
- * without touching Production.
+ * The script is intentionally standalone so it can be attached to the isolated
+ * V2 spreadsheet without touching Production. Existing legacy/old V2-named
+ * sheets are never deleted or renamed.
  */
 
 const AF_V2 = {
@@ -20,21 +19,28 @@ const AF_V2 = {
   auditSheet: '_V2_DATA_AUDIT',
   schemaVersion: '2.0.0',
   tables: {
-    Product: ['productId','productCode','name','categoryId','active','minimumStock','defaultLocationId','createdAt','updatedAt'],
-    ProductUnit: ['productUnitId','productId','unitCode','unitName','conversionToBase','isBase','active','createdAt','updatedAt'],
-    ProductPrice: ['priceId','productUnitId','priceType','price','currency','effectiveFrom','effectiveTo','active','createdAt','updatedAt'],
-    StockBalance: ['productId','locationId','quantityBase','updatedAt','version'],
-    StockLedger: ['movementId','transactionId','productId','locationId','direction','quantityBase','movementType','occurredAt','actorId','requestId','reason'],
-    Sale: ['transactionId','requestId','actorId','shiftId','customerId','occurredAt','subtotal','discount','total','status','createdAt'],
-    SaleItem: ['saleItemId','transactionId','productId','productUnitId','sellingUnit','sellingQty','conversionToBase','baseQty','sellingPrice','subtotal','createdAt'],
-    Payment: ['paymentId','transactionId','method','amount','reference','paidAt','createdAt'],
-    RequestLedger: ['requestId','payloadHash','action','status','transactionId','resultJson','errorCode','createdAt','updatedAt'],
-    TransactionJournal: ['journalId','transactionId','requestId','state','payloadHash','preparedAt','committedAt','recoveryJson','updatedAt'],
-    AuditLog: ['auditId','occurredAt','actorId','action','entityType','entityId','requestId','metadataJson'],
-    MigrationMap: ['migrationId','sourceSheet','sourceKey','targetEntity','targetKey','status','reason','checkedAt'],
-    MigrationQuarantine: ['quarantineId','sourceSheet','sourceKey','ruleCode','severity','rawJson','reason','createdAt','resolvedAt'],
-    Reconciliation: ['reconciliationId','runId','entityType','entityId','sourceValue','targetValue','delta','status','detailsJson','checkedAt']
-  }
+    Products: ['ProductId','Sku','Name','CategoryId','InventoryTrackingMode','Active','CreatedAt','UpdatedAt'],
+    ProductUnits: ['UnitId','ProductId','Name','Symbol','IsBaseUnit','CanSell','CanPurchase','Active','CreatedAt','UpdatedAt'],
+    UnitConversions: ['ConversionId','ProductId','FromUnitId','ToUnitId','Factor','Active','CreatedAt','UpdatedAt'],
+    ProductPrices: ['PriceId','ProductId','UnitId','Price','Currency','EffectiveFrom','EffectiveTo','Active','CreatedAt','CreatedBy'],
+    StockBalance: ['ProductId','QuantityBase','UpdatedAt'],
+    StockLedger: ['MovementId','TransactionId','ProductId','QuantityBase','Direction','Type','OccurredAt','ActorId','Reason'],
+    Sales: ['TransactionId','ReceiptNumber','RequestId','RequestFingerprint','ShiftId','CustomerId','ActorId','Subtotal','Discount','Tax','Total','Paid','Change','PaymentMethod','CreatedAt'],
+    SaleItems: ['SaleItemId','TransactionId','ProductId','ProductName','UnitId','UnitName','Qty','ConversionFactor','QtyBase','UnitPrice','Subtotal','PriceId'],
+    Payments: ['PaymentId','TransactionId','Method','Amount','CreatedAt'],
+    RequestLedger: ['RequestId','PayloadHash','Action','Status','TransactionId','ResultJson','ErrorCode','CreatedAt','CompletedAt'],
+    AuditLog: ['AuditId','OccurredAt','ActorId','Action','EntityType','EntityId','RequestId','MetadataJson'],
+    TransactionJournal: ['JournalId','TransactionId','RequestId','State','PreparedAt','CommittedAt','PayloadHash','RecoveryJson'],
+    SchemaVersion: ['Version','AppliedAt'],
+    MigrationRun: ['RunId','StartedAt','CompletedAt','Status','Source','Target','SummaryJson'],
+    MigrationQuarantine: ['RunId','EntityType','SourceId','Reason','PayloadJson','CreatedAt']
+  },
+  masterSurfaces: {
+    Location: ['LocationId','LocationCode','Name','Active','CreatedAt','UpdatedAt'],
+    Supplier: ['SupplierId','SupplierCode','Name','Active','CreatedAt','UpdatedAt'],
+    ProductLocation: ['ProductLocationId','ProductId','LocationId','IsDefault','Active','CreatedAt','UpdatedAt']
+  },
+  deprecatedBootstrapTables: ['Product','ProductUnit','ProductPrice','Sale','SaleItem','Payment','MigrationMap','Reconciliation']
 };
 
 function afV2Spreadsheet_() {
@@ -44,13 +50,14 @@ function afV2Spreadsheet_() {
 function bootstrapV2Database() {
   const ss = afV2Spreadsheet_();
   const created = [];
-  Object.keys(AF_V2.tables).forEach(name => {
+  const ensure = Object.assign({}, AF_V2.tables, AF_V2.masterSurfaces);
+  Object.keys(ensure).forEach(name => {
     let sh = ss.getSheetByName(name);
     if (!sh) {
       sh = ss.insertSheet(name);
       created.push(name);
     }
-    const headers = AF_V2.tables[name];
+    const headers = ensure[name];
     if (sh.getLastRow() === 0) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     else {
       const existing = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), headers.length)).getValues()[0];
@@ -60,17 +67,20 @@ function bootstrapV2Database() {
     }
     sh.setFrozenRows(1);
   });
+
   const meta = afEnsureSheet_('_V2_META', ['key','value','recordedAt']);
   const rows = [
     ['schemaVersion', AF_V2.schemaVersion, new Date()],
     ['baselineSpreadsheetId', ss.getId(), new Date()],
     ['baselineSpreadsheetName', ss.getName(), new Date()],
     ['bootstrapMode', 'NON_DESTRUCTIVE', new Date()],
-    ['legacySheetsPreserved', 'TRUE', new Date()]
+    ['legacySheetsPreserved', 'TRUE', new Date()],
+    ['canonicalSchemaSource', 'src/infrastructure/sheets/Schema.js', new Date()],
+    ['deprecatedBootstrapTables', AF_V2.deprecatedBootstrapTables.join(','), new Date()]
   ];
   if (meta.getLastRow() > 1) meta.getRange(2, 1, meta.getLastRow() - 1, 3).clearContent();
   meta.getRange(2, 1, rows.length, 3).setValues(rows);
-  return { schemaVersion: AF_V2.schemaVersion, createdTables: created, spreadsheetId: ss.getId() };
+  return { schemaVersion: AF_V2.schemaVersion, createdTables: created, spreadsheetId: ss.getId(), canonical: true };
 }
 
 function auditLegacyWorkbook() {
@@ -79,7 +89,7 @@ function auditLegacyWorkbook() {
   const output = [];
   ss.getSheets().forEach(sh => {
     const name = sh.getName();
-    if (name.indexOf('_V2_') === 0 || AF_V2.tables[name]) return;
+    if (name.indexOf('_V2_') === 0 || AF_V2.tables[name] || AF_V2.masterSurfaces[name]) return;
     const rows = sh.getLastRow();
     const cols = sh.getLastColumn();
     const values = rows && cols ? sh.getRange(1, 1, rows, cols).getValues() : [];
