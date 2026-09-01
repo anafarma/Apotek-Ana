@@ -38,7 +38,20 @@ export async function createSale(command, deps, clock = () => new Date(), hashFn
     const payment = normalizePayment(command.payment);
     if (payment.amount < total) throw new TransactionError(C.INSUFFICIENT_PAYMENT);
     const transaction = Object.freeze({ transactionId: command.transactionId ?? deps.ids.newId(), receiptNumber: command.receiptNumber ?? deps.ids.newReceiptNumber(now), requestId: command.requestId, requestFingerprint: fingerprint, shiftId: command.shiftId, customerId: command.customerId ?? null, actorId: command.actor?.userId ?? null, items: Object.freeze(resolvedItems), subtotal, discount, tax, total, payment, createdAt: now.toISOString() });
-    return await deps.transactions.commitSaleAtomic(transaction);
+    const persisted = await deps.transactions.commitSaleAtomic(transaction);
+    // Keep the internal legacy-compatible flat fields while also exposing the
+    // stable external API shape documented in docs/04-api-contract.md.
+    return {
+      ...persisted,
+      transactionId: persisted?.transactionId ?? transaction.transactionId,
+      receiptNumber: persisted?.receiptNumber ?? transaction.receiptNumber,
+      status: persisted?.status ?? 'COMPLETED',
+      items: persisted?.items ?? transaction.items,
+      total: persisted?.total ?? total,
+      createdAt: persisted?.createdAt ?? transaction.createdAt,
+      totals: persisted?.totals ?? { subtotal, discount, tax, total: persisted?.total ?? total },
+      timestamp: persisted?.timestamp ?? persisted?.createdAt ?? transaction.createdAt
+    };
   } catch (error) {
     if (error?.code === 'TRANSACTION_RECOVERY_REQUIRED' || error?.code === 'RECOVERY_REQUIRED') {
       if (typeof deps.requestLedger.markRecoveryRequired === 'function') await deps.requestLedger.markRecoveryRequired(command.requestId, 'TRANSACTION_RECOVERY_REQUIRED', clock().toISOString());
