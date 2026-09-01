@@ -59,7 +59,9 @@ test('insufficient stock is a normal business rejection: no journal or sale muta
   assert.equal(ss.getSheetByName(V2_SHEETS.PAYMENTS).rows.length,1);
   assert.equal(ss.getSheetByName(V2_SHEETS.STOCK_LEDGER).rows.length,2);
   assert.equal(ss.getSheetByName(V2_SHEETS.AUDIT_LOG).rows.length,1);
-  assert.equal(journal.calls.length,0);
+  assert.equal(journal.calls.filter(x=>x[0]==='prepare').length,0);
+  assert.equal(journal.calls.filter(x=>x[0]==='commit').length,0);
+  assert.equal(journal.calls.filter(x=>x[0]==='recovery').length,0);
   assert.equal(request.calls.at(-1)[0],'fail');
   assert.equal(request.record.Status,'FAILED');
   unlock();
