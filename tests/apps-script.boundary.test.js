@@ -5,10 +5,15 @@ import fs from 'node:fs';
 const bootstrap = fs.readFileSync(new URL('../tools/apps-script/V2Bootstrap.gs', import.meta.url), 'utf8');
 const web = fs.readFileSync(new URL('../tools/apps-script/V2WebApp.gs', import.meta.url), 'utf8');
 
+// V2WebApp.gs and V2Bootstrap.gs are deployed as the same Apps Script project.
+// The spreadsheet binding is deliberately centralized in the bootstrap helper,
+// so the boundary must prove that the deployed project opens only AF_V2.
+const appsScriptProject = `${bootstrap}\n${web}`;
+
 test('Apps Script boundary targets only the isolated V2 spreadsheet', () => {
   assert.match(bootstrap, /spreadsheetId:\s*'1creA8S9UeQ5CIdp84U_dqBmhN1BdrDDea0FIGf3hnYo'/);
-  assert.match(web, /SpreadsheetApp\.openById\(AF_V2\.spreadsheetId\)/);
-  assert.doesNotMatch(web, /script\.google\.com\/macros\/s\//);
+  assert.match(appsScriptProject, /SpreadsheetApp\.openById\(AF_V2\.spreadsheetId\)/);
+  assert.doesNotMatch(appsScriptProject, /script\.google\.com\/macros\/s\//);
 });
 
 test('Apps Script exposes health and master read actions', () => {
