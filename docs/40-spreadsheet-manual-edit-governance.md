@@ -6,6 +6,8 @@ Google Sheets remains a supported administrative surface in V2. The owner may us
 
 Direct spreadsheet editing is therefore **not an exception path**. It is a first-class integration path with explicit boundaries.
 
+Production is outside the V2 governance target. The Production spreadsheet and its Apps Script remain read-only reference/baseline material for this work and are never modified by V2 setup, reconciliation, migration, or tests.
+
 ## Source-of-truth rule
 
 V2 has two categories of data:
@@ -44,6 +46,10 @@ The following sheets are application-owned and are **not** a normal manual-edit 
 - Reconciliation
 
 A manual stock correction must use an explicit adjustment workflow. It must produce a StockLedger movement and AuditLog record; changing StockBalance alone is never considered a valid stock adjustment.
+
+Physical stock movement between locations requires a controlled stock-transfer workflow; changing ProductLocation is a master assignment change and must not silently create stock movements.
+
+Transactional history and stock mutations remain application-owned even though approved master data can be edited directly in Google Sheets.
 
 ## Delete policy
 
