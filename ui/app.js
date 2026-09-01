@@ -80,9 +80,9 @@ function showResult(id,text,cls=''){ $(id).className=`result ${cls}`;$(id).textC
 function renderQueue(){ $('queueResult').textContent=`Queue: ${state.queue.length}`; }
 function toggleOffline(){state.offline=!state.offline;$('offlineBadge').textContent=state.offline?'OFFLINE':'ONLINE';$('toggleOfflineBtn').textContent=state.offline?'Kembali online':'Simulasikan offline';}
 async function sync(){
-  if(state.offline){showResult('queueResult','Tidak dapat sync saat offline.','error');return;}
+  if(state.offline){showResult('queueResult',`Queue: ${state.queue.length}. Tidak dapat sync saat offline.`,'error');return;}
   if(!state.queue.length){renderQueue();return;}
-  if(!API_URL){showResult('queueResult','API V2 belum dikonfigurasi; queue dipertahankan dan TIDAK dihapus.','error');return;}
+  if(!API_URL){showResult('queueResult',`Queue: ${state.queue.length}. API V2 belum dikonfigurasi; queue dipertahankan dan TIDAK dihapus.`,'error');return;}
   const pending=[...state.queue];
   for(let i=0;i<pending.length;i++){
     try {
@@ -91,14 +91,14 @@ async function sync(){
       state.queue=pending.slice(i);
       saveQueue();
       renderQueue();
-      showResult('queueResult',`Sync berhenti pada request ${i+1}/${pending.length}: ${error.message}. Request yang belum di-acknowledge dipertahankan.`,'error');
+      showResult('queueResult',`Queue: ${state.queue.length}. Sync berhenti pada request ${i+1}/${pending.length}: ${error.message}. Request yang belum di-acknowledge dipertahankan.`,'error');
       return;
     }
   }
   state.queue=[];
   saveQueue();
   renderQueue();
-  showResult('queueResult',`${pending.length} request berhasil dikirim dan di-acknowledge API V2.`,'ok');
+  showResult('queueResult',`Queue: 0. ${pending.length} request berhasil dikirim dan di-acknowledge API V2.`,'ok');
 }
 function validateMaster(){
   const strip=Number($('stripPrice').value),box=Number($('boxPrice').value);
