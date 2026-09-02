@@ -24,6 +24,16 @@ function doGet(e) {
       if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
       return afOk_({ actor: actor, shift: afShiftStatus_(actor) });
     }
+    if (action === 'openShift') {
+      const actor = afGetSession_(e.parameter.sessionToken || '');
+      if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
+      return afOk_({ actor:actor, result:afOpenShift_(actor,e.parameter.openingCash,e.parameter.note) });
+    }
+    if (action === 'closeShift') {
+      const actor = afGetSession_(e.parameter.sessionToken || '');
+      if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
+      return afOk_({ actor:actor, result:afCloseShift_(actor,e.parameter.closingCash,e.parameter.note) });
+    }
     if (action === 'commitSale') {
       const actor = afGetSession_(e.parameter.sessionToken || '');
       if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
