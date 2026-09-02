@@ -19,6 +19,11 @@ function doGet(e) {
     if (action === 'schemaHealth') {
       return afOk_({ schema: afSchemaHealth_() });
     }
+    if (action === 'myShift') {
+      const actor = afGetSession_(e.parameter.sessionToken || '');
+      if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
+      return afOk_({ actor: actor, shift: afShiftStatus_(actor) });
+    }
     if (action === 'getObat') {
       return afOk_({ products: afReadObjects_(AF_SHEET.OBAT) });
     }
