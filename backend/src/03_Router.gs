@@ -8,6 +8,14 @@ function doGet(e) {
         spreadsheet: AF_CONFIG.SPREADSHEET_ID
       });
     }
+    if (action === 'login') {
+      const identity = e.parameter.identity || e.parameter.username || '';
+      const password = e.parameter.password || '';
+      const actor = afAuthenticate_(identity, password);
+      if (!actor) return afFail_('LOGIN_FAILED', 'Identitas atau password tidak valid.');
+      const token = afCreateSession_(actor);
+      return afOk_({ sessionToken: token, actor: actor });
+    }
     if (action === 'schemaHealth') {
       return afOk_({ schema: afSchemaHealth_() });
     }
