@@ -24,6 +24,12 @@ function doGet(e) {
       if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
       return afOk_({ actor: actor, shift: afShiftStatus_(actor) });
     }
+    if (action === 'commitSale') {
+      const actor = afGetSession_(e.parameter.sessionToken || '');
+      if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
+      const payload = JSON.parse(e.parameter.payload || '{}');
+      return afOk_({ actor: actor, result: afCommitSale_(actor, payload) });
+    }
     if (action === 'getStockSnapshot') {
       const actor = afGetSession_(e.parameter.sessionToken || '');
       if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
