@@ -8,6 +8,9 @@ function doGet(e) {
         spreadsheet: AF_CONFIG.SPREADSHEET_ID
       });
     }
+    if (action === 'schemaHealth') {
+      return afOk_({ schema: afSchemaHealth_() });
+    }
     if (action === 'getObat') {
       return afOk_({ products: afReadObjects_(AF_SHEET.OBAT) });
     }
