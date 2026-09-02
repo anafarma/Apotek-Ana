@@ -24,6 +24,12 @@ function doGet(e) {
       if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
       return afOk_({ actor: actor, shift: afShiftStatus_(actor) });
     }
+    if (action === 'getSellableCatalog') {
+      const actor = afGetSession_(e.parameter.sessionToken || '');
+      if (!actor) return afFail_('UNAUTHORIZED', 'Session tidak valid.');
+      afRequirePermission_(actor, AF_PERMISSION.READ_CATALOG);
+      return afOk_({ actor: actor, products: afSellableCatalog_() });
+    }
     if (action === 'getObat') {
       return afOk_({ products: afReadObjects_(AF_SHEET.OBAT) });
     }
